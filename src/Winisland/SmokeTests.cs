@@ -138,7 +138,8 @@ internal static class SmokeTests
 
             media.Dispose(); // Keep real player events out of the controlled input fixtures.
             Phase("Physical audio and player controls");
-            await AudioVerification.RunAsync(output, notch, media, audio, playerVolume, playerFixture, (condition, name) => Assert(condition, name, results));
+            await AudioVerification.RunAsync(output, notch, media, audio, playerVolume, playerFixture,
+                (condition, name) => { Assert(condition, name, results); Phase(name); });
             await VolumeMotionVerification.RunAsync(notch, (condition, name) => Assert(condition, name, results));
             await FocusVerification.RunAsync(notch, store, focus, (condition, name) => Assert(condition, name, results));
             await OrganizerVerification.RunAsync(output, (condition, name) => Assert(condition, name, results));

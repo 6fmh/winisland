@@ -48,6 +48,7 @@ $checks = [Collections.Generic.List[object]]::new()
 $activeInstallDirectory = $null
 $ownedRestartPid = $null
 $passed = $false
+$verificationFailure = $null
 
 function Assert-Installer([bool]$Condition, [string]$Name) {
     $checks.Add([pscustomobject]@{ check = $Name; passed = $Condition })
@@ -100,7 +101,13 @@ function Invoke-Uninstall([string]$InstallDirectory, [string]$LogName) {
     Assert-Installer ($null -eq (Get-SigninTask)) 'Uninstall removes the account-specific sign-in task'
     $backup = $registry.OpenSubKey($backupKey)
     $backupExists = $null -ne $backup
-    if ($backup) { $backup.Dispose() }
+    if ($backup) {
+        try {
+            $values = [ordered]@{}
+            foreach ($name in $backup.GetValueNames()) { $values[$name] = $backup.GetValue($name) }
+            [IO.File]::WriteAllText((Join-Path $outputDirectory ($LogName + '-remaining-backup.json')), ($values | ConvertTo-Json))
+        } finally { $backup.Dispose() }
+    }
     Assert-Installer (!$backupExists) 'Uninstall clears its Drop tray backup'
 }
 function Stop-OwnedRestart {
@@ -120,6 +127,7 @@ function Assert-SigninTask([string]$ApplicationPath) {
     $task = Get-SigninTask
     Assert-Installer ($null -ne $task) 'Creates an account-specific sign-in task'
     try {
+        [IO.File]::WriteAllText((Join-Path $outputDirectory 'signin-task.xml.log'), [string]$task.Xml)
         [xml]$xml = $task.Xml
         Assert-Installer ($xml.Task.Triggers.LogonTrigger.Delay -eq 'PT0S' -and $xml.Task.Principals.Principal.RunLevel -eq 'LeastPrivilege' -and
             $xml.Task.Principals.Principal.LogonType -eq 'InteractiveToken' -and $xml.Task.Settings.RunOnlyIfNetworkAvailable -eq 'false' -and
@@ -218,11 +226,18 @@ try {
         else { Assert-Installer ($tray.GetValue('DragTrayEnabled') -eq $(if ($scenario -eq 'disabled') { 0 } else { 1 })) "Uninstall restores or preserves the expected Drop tray setting ($scenario)" }
     }
     $passed = $true
+} catch {
+    $verificationFailure = $_.Exception.ToString()
+    throw
 } finally {
     try {
         Stop-OwnedRestart
         if ($activeInstallDirectory -and (Test-Path -LiteralPath (Join-Path $activeInstallDirectory 'unins000.exe'))) {
-            Invoke-Uninstall $activeInstallDirectory 'cleanup-uninstall.log'
+            try { Invoke-Uninstall $activeInstallDirectory 'cleanup-uninstall.log' }
+            catch {
+                [IO.File]::WriteAllText((Join-Path $outputDirectory 'cleanup-error.log'), $_.Exception.ToString())
+                if (!$verificationFailure) { throw }
+            }
         }
     } finally {
         if ($originalTrayExists) { $tray.SetValue('DragTrayEnabled', $originalTrayValue, $originalTrayKind) }
@@ -234,7 +249,7 @@ try {
         [Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskFolder) | Out-Null
         [Runtime.InteropServices.Marshal]::FinalReleaseComObject($scheduler) | Out-Null
         $env:WINISLAND_DATA_DIR = $previousDataDirectory
-        [IO.File]::WriteAllText((Join-Path $outputDirectory 'results.json'), (@{ passed = $passed; checks = @($checks.ToArray()); desktopChanges = 'disposable-vm-only'; installerSha256 = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant() } | ConvertTo-Json -Depth 6))
+        [IO.File]::WriteAllText((Join-Path $outputDirectory 'results.json'), (@{ passed = $passed; error = $verificationFailure; checks = @($checks.ToArray()); desktopChanges = 'disposable-vm-only'; installerSha256 = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant() } | ConvertTo-Json -Depth 6))
     }
 }
 Write-Output "Installer verification passed: $outputDirectory"

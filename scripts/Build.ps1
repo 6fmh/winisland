@@ -26,13 +26,19 @@ if (Test-Path -LiteralPath $localDotnet) {
 }
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $publishDirectory = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } elseif ($Verify) { Join-Path $projectRoot "artifacts/verification/candidate/$Runtime" } else { Join-Path $projectRoot "dist/$Runtime" }
+# Single-file self-contained builds use composite ReadyToRun dependencies;
+# portable builds use standalone images. Sharing the SDK's R2R cache can leave
+# portable dependencies pointing at an absent self-contained composite image.
+$publishFlavor = if ($SelfContained) { 'self-contained' } else { 'portable' }
+$intermediateDirectory = (Join-Path $projectRoot "src/Winisland/obj/publish/$publishFlavor/$Runtime/")
+$buildDirectory = (Join-Path $projectRoot "src/Winisland/bin/publish/$publishFlavor/$Runtime/")
 $publishArguments = @('publish', (Join-Path $projectRoot 'src/Winisland/Winisland.csproj'),
     '-c', 'Release', '-r', $Runtime, '--self-contained', $SelfContained.IsPresent.ToString().ToLowerInvariant(),
     '-p:PublishSingleFile=true', '-p:EnableCompressionInSingleFile=false', '-p:PublishReadyToRun=true', '-p:IncludeNativeLibrariesForSelfExtract=true',
+    "-p:IntermediateOutputPath=$intermediateDirectory", "-p:OutputPath=$buildDirectory",
     '-p:DebugType=None', '-p:DebugSymbols=false', '-o', $publishDirectory, '--nologo')
-# Compile portable ReadyToRun code for the minimum supported .NET 8 runtime.
-# A newer patch's crossgen code can fail fast on an older installed runtime.
-# Self-contained installers keep the SDK's current patched runtime instead.
+# Portable images target the minimum supported .NET 8 references. Self-contained
+# installers use the SDK's current patched runtime.
 if (!$SelfContained) { $publishArguments += '-p:TargetLatestRuntimePatch=false' }
 & $buildTool @publishArguments
 if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }

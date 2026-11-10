@@ -30,8 +30,5 @@
     <Content Include="Assets/BrowserExtension/**/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="browser-extension/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup><PackageReference Include="NAudio.Wasapi" Version="2.3.0" /></ItemGroup>
-  <!-- Keep the FFT dependency as IL: its precompiled code can fail fast on
-       some Windows CPUs. The application and other dependencies stay ReadyToRun. -->
-  <ItemGroup><PublishReadyToRunExclude Include="NAudio.Core.dll" /></ItemGroup>
   <ItemGroup><PackageReference Include="System.Management" Version="8.0.0" /></ItemGroup>
 </Project>

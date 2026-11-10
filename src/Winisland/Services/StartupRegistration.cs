@@ -122,7 +122,9 @@ internal static class StartupRegistration
         {
             object? task = null;
             try { task = _folder.GetTask(TaskName); return (string)((dynamic)task).Xml; }
-            catch (COMException ex) when ((uint)ex.HResult == 0x80070002) { return null; }
+            // Dynamic COM dispatch maps ERROR_FILE_NOT_FOUND to either a COM
+            // exception or FileNotFoundException, depending on the runtime.
+            catch (Exception ex) when ((uint)ex.HResult == 0x80070002) { return null; }
             finally { if (task is not null) Marshal.FinalReleaseComObject(task); }
         }
         internal void Write(string xml)
@@ -133,7 +135,7 @@ internal static class StartupRegistration
         internal void Delete()
         {
             try { _folder.DeleteTask(TaskName, 0); }
-            catch (COMException ex) when ((uint)ex.HResult == 0x80070002) { }
+            catch (Exception ex) when ((uint)ex.HResult == 0x80070002) { }
         }
         public void Dispose() { Marshal.FinalReleaseComObject(_folder); Marshal.FinalReleaseComObject(_service); }
     }

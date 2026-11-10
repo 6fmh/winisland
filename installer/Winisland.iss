@@ -79,6 +79,9 @@ const
   BackupKey = 'Software\Winisland\Installer';
   StartupKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
 
+var
+  StartupConfigurationFailed: Boolean;
+
 function SendMessageTimeout(Wnd: HWND; Msg, WParam: LongWord;
   LParam: String; Flags, Timeout: LongWord; var MessageResult: LongWord): LongInt;
   external 'SendMessageTimeoutW@user32.dll stdcall';
@@ -106,7 +109,10 @@ begin
   Result := '';
   if not IsWindows11 then Exit;
   { Keep the first install's backup across upgrades and reinstalls. }
-  if RegQueryDWordValue(HKCU, BackupKey, 'DropTrayOriginalPresent', OriginalPresent) then Exit;
+  if RegQueryDWordValue(HKCU, BackupKey, 'DropTrayOriginalPresent', OriginalPresent) then begin
+    Log('Preserving an existing Drop tray backup.');
+    Exit;
+  end;
 
   OriginalPresent := 0;
   if RegValueExists(HKCU, DropTrayKey, 'DragTrayEnabled') then begin
@@ -122,6 +128,7 @@ begin
   end;
   if not RegWriteDWordValue(HKCU, BackupKey, 'DropTrayOriginalPresent', OriginalPresent) then
     Result := 'Setup could not save the previous Windows Drop tray setting.';
+  Log(Format('Saved Drop tray original presence: %d', [OriginalPresent]));
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -138,11 +145,20 @@ begin
     else if WizardIsTaskSelected('startwithwindows') then StartupChoice := 'true'
     else StartupChoice := 'false';
     if not Exec(ExpandConstant('{app}\Winisland.exe'), '--configure-startup ' + StartupChoice,
-      ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
+      StartupConfigurationFailed := True;
       RaiseException('Setup could not configure sign-in startup.');
-    if ResultCode <> 0 then
+    end;
+    if ResultCode <> 0 then begin
+      StartupConfigurationFailed := True;
       RaiseException('Setup could not save the sign-in preference. Please try again.');
+    end;
   end;
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  if StartupConfigurationFailed then Result := 1 else Result := 0;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -153,7 +169,9 @@ var
 begin
   if CurUninstallStep <> usPostUninstall then Exit;
   Restored := True;
+  Log('Restoring the saved Drop tray state after uninstall.');
   if RegQueryDWordValue(HKCU, BackupKey, 'DropTrayOriginalPresent', OriginalPresent) then begin
+    Log(Format('Saved Drop tray original presence: %d', [OriginalPresent]));
     { Respect a subsequent change the user made in Windows Settings. }
     if RegQueryDWordValue(HKCU, DropTrayKey, 'DragTrayEnabled', CurrentValue) and (CurrentValue = 0) then begin
       if OriginalPresent = 0 then
@@ -165,9 +183,9 @@ begin
       NotifyDropTrayChanged;
     end;
     if Restored then begin
-      RegDeleteValue(HKCU, BackupKey, 'DropTrayOriginalValue');
-      RegDeleteValue(HKCU, BackupKey, 'DropTrayOriginalPresent');
-      RegDeleteKeyIfEmpty(HKCU, BackupKey);
+      Log(Format('Cleared Drop tray original value: %d', [Ord(RegDeleteValue(HKCU, BackupKey, 'DropTrayOriginalValue'))]));
+      Log(Format('Cleared Drop tray original presence: %d', [Ord(RegDeleteValue(HKCU, BackupKey, 'DropTrayOriginalPresent'))]));
+      Log(Format('Removed empty Drop tray backup key: %d', [Ord(RegDeleteKeyIfEmpty(HKCU, BackupKey))]));
     end else
       Log('Could not restore the Windows Drop tray setting; its backup has been kept.');
   end;

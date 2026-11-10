@@ -45,6 +45,9 @@ jobs:
       - name: Build and verify self-contained installer payload
         shell: pwsh
         run: ./scripts/Build-Installer.ps1 -Verify
+      - name: Verify portable publication after the self-contained build
+        shell: pwsh
+        run: ./scripts/Build.ps1 -Verify
       - name: Install, rollback, helper-upgrade and uninstall in disposable Windows VM
         shell: pwsh
         run: |
