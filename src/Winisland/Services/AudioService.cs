@@ -67,12 +67,25 @@ public sealed class AudioService : IDisposable
     }
 
     // Verification observes the endpoint independently of the app sessions.
-    internal AudioSnapshot ReadOutputForTest() => WithEndpoint(endpoint =>
+    internal AudioSnapshot ReadOutputForTest()
     {
-        Marshal.ThrowExceptionForHR(endpoint.GetMasterVolumeLevelScalar(out var volume));
-        Marshal.ThrowExceptionForHR(endpoint.GetMute(out var muted));
-        return new AudioSnapshot(true, (int)Math.Round(volume * 100), muted);
-    });
+        try
+        {
+            return WithEndpoint(endpoint =>
+            {
+                Marshal.ThrowExceptionForHR(endpoint.GetMasterVolumeLevelScalar(out var volume));
+                Marshal.ThrowExceptionForHR(endpoint.GetMute(out var muted));
+                return new AudioSnapshot(true, (int)Math.Round(volume * 100), muted);
+            });
+        }
+        catch (COMException ex) when ((uint)ex.HResult == 0x80070490)
+        {
+            // GetDefaultAudioEndpoint returns ERROR_NOT_FOUND on hardware-free
+            // Windows VMs. Other COM failures must still fail verification.
+            _endpointDirty = true;
+            return new(false, 0, false);
+        }
+    }
 
     private bool ApplyToApplication(Func<ISimpleAudioVolume, int> action)
     {

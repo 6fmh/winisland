@@ -36,9 +36,15 @@ internal static class BackgroundVerification
                 ? Quote(executable) + " " + Quote(Path.Combine(AppContext.BaseDirectory, "Winisland.dll"))
                 : Quote(executable);
             var command = new StringBuilder(entrypoint + " " + string.Join(" ", args.Append("--verification-worker").Select(Quote)));
-            var startup = new StartupInfo { Size = (uint)Marshal.SizeOf<StartupInfo>(), Desktop = "WinSta0\\" + desktopName };
+            var startup = new StartupInfo
+            {
+                Size = (uint)Marshal.SizeOf<StartupInfo>(), Desktop = "WinSta0\\" + desktopName,
+                Flags = 0x0100, Input = GetStdHandle(-10), Output = GetStdHandle(-11), Error = GetStdHandle(-12)
+            };
             // Create suspended so the job owns the worker before it can spawn fixtures.
-            if (!CreateProcess(executable, command, IntPtr.Zero, IntPtr.Zero, false,
+            // Inherit only handles already marked inheritable by the parent.
+            // This preserves redirected fatal-runtime diagnostics in launcher logs.
+            if (!CreateProcess(executable, command, IntPtr.Zero, IntPtr.Zero, true,
                 0x00000004 | 0x08000000 | 0x00004000, IntPtr.Zero, null, ref startup, out process))
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not launch background verification.");
             if (!AssignProcessToJobObject(job, process.Process))
@@ -47,6 +53,14 @@ internal static class BackgroundVerification
             if (WaitForSingleObject(process.Process, 180000) != 0)
                 throw new TimeoutException("Background verification exceeded three minutes. Its worker and fixtures were stopped.");
             if (!GetExitCodeProcess(process.Process, out var code)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (code != 0)
+            {
+                var index = Array.IndexOf(args, "--output");
+                var output = Path.GetFullPath(index >= 0 && index + 1 < args.Length ? args[index + 1] : "artifacts/verification");
+                var reportName = args.Contains("--control-center-test") ? "control-center-results.json" : "results.json";
+                if (!File.Exists(Path.Combine(output, reportName)))
+                    WriteFailure(args, new InvalidOperationException($"Verification worker exited with code 0x{code:X8} before writing its report. See launcher-stderr.log."));
+            }
             return unchecked((int)code);
         }
         finally
@@ -138,6 +152,7 @@ internal static class BackgroundVerification
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, uint length, out uint needed);
     [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
     [DllImport("kernel32.dll")] private static extern uint SetErrorMode(uint mode);
+    [DllImport("kernel32.dll")] private static extern IntPtr GetStdHandle(int handle);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool CreateProcess(string application, StringBuilder command, IntPtr processSecurity, IntPtr threadSecurity, bool inherit, uint flags, IntPtr environment, string? directory, ref StartupInfo startup, out ProcessInformation process);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern IntPtr CreateJobObject(IntPtr security, string? name);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref JobLimits limits, uint length);

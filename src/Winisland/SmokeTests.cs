@@ -45,18 +45,25 @@ internal static class SmokeTests
         using var focus = new FocusTimer();
         using var playerFixture = new PlayerVolumeVerification.FixturePlayerVolumeBackend();
         using var playerVolume = new PlayerVolumeService(app.Dispatcher, new IPlayerVolumeBackend[] { playerFixture });
+        void Phase(string name) => File.AppendAllText(Path.Combine(output, "verification-progress.log"), $"{DateTimeOffset.UtcNow:o} {name}\n");
         try
         {
+            Phase("Update fixtures and UI");
             await UpdateVerification.RunAsync(app, output, (condition, name) => Assert(condition, name, results));
             if (args.Contains("--updates-only"))
             {
                 await File.WriteAllTextAsync(Path.Combine(output, "results.json"), JsonSerializer.Serialize(new { passed = true, results }, new JsonSerializerOptions { WriteIndented = true }));
                 return 0;
             }
+            Phase("Failure reporting");
             VerifyFailureReports(output, (condition, name) => Assert(condition, name, results));
+            Phase("Spectrum analysis");
             SpectrumVerification.Run((condition, name) => Assert(condition, name, results));
+            Phase("Browser registration");
             BrowserRegistrationVerification.Run(output, (condition, name) => Assert(condition, name, results));
+            Phase("Player volume fixtures and native bridge");
             await PlayerVolumeVerification.RunAsync(app.Dispatcher, (condition, name) => Assert(condition, name, results));
+            Phase("Spotify fixtures");
             await SpotifyVerification.RunAsync((condition, name) => Assert(condition, name, results));
             if (args.Contains("--spotify-only"))
             {
@@ -79,6 +86,7 @@ internal static class SmokeTests
             Assert(new FileShelf().Items.Single().Path == file, "Shelf references survive restart", results);
             shelf.Remove(shelf.Items[0]);
             Assert(File.ReadAllText(file) == "Shelf operations must preserve this content.", "Removing shelf reference preserves original file", results);
+            Phase("Upload fixtures");
             await UploadVerification.RunAsync((condition, name) => Assert(condition, name, results));
 
             focus.Start(1);
@@ -96,6 +104,7 @@ internal static class SmokeTests
             var outline = NotchSurface.CreateGeometry(NotchMetrics.DefaultWidth, NotchMetrics.DefaultHeight);
             Assert(outline.FillContains(new Point(NotchMetrics.DefaultWidth / 2, 16)) && !outline.FillContains(new Point(2, 18)) && !outline.FillContains(new Point(10, 31)), "Notch contour has inward shoulders and curved lower corners", results);
 
+            Phase("Windows audio and media availability");
             using var audio = new AudioService();
             var audioStatus = audio.ReadOutputForTest();
             results.Add(new { check = "Windows default audio endpoint", available = audioStatus.Available, volume = audioStatus.Volume, muted = audioStatus.Muted });
@@ -105,6 +114,7 @@ internal static class SmokeTests
             results.Add(new { check = "Current media app audio session", source = media.Current.Source, snapshot = audio.Read() });
             results.Add(new { check = "Windows power status", status = NativeMethods.GetBattery() });
 
+            Phase("Native notch window");
             notch = new NotchWindow(store, media, audio, focus, shelf, playerVolume: playerVolume);
             notch.Show();
             notch.StopPollingForTest();
@@ -127,6 +137,7 @@ internal static class SmokeTests
             Assert(GetAlpha(closed, (int)(notch.ActualWidth / 2), 15) == 255 && GetAlpha(closed, 10, 70) == 0, "Idle notch is opaque and surrounding window is transparent", results);
 
             media.Dispose(); // Keep real player events out of the controlled input fixtures.
+            Phase("Physical audio and player controls");
             await AudioVerification.RunAsync(output, notch, media, audio, playerVolume, playerFixture, (condition, name) => Assert(condition, name, results));
             await VolumeMotionVerification.RunAsync(notch, (condition, name) => Assert(condition, name, results));
             await FocusVerification.RunAsync(notch, store, focus, (condition, name) => Assert(condition, name, results));

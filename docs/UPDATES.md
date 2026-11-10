@@ -14,6 +14,6 @@ Startup verification uses `scripts/Invoke-Verification.ps1 -Suite Startup` on a 
 
 Three fresh x64 workers on the development machine rendered the first notch in 417–440 ms, compared with 676–719 ms before these changes (about 39% faster on average). Both deferred panels passed their first-use checks. These local measurements are not a PC boot-time guarantee.
 
-Portable ReadyToRun builds compile against the minimum .NET 8 runtime references so the precompiled code also works with older installed .NET 8 patches. Self-contained installers bundle the current patched runtime supplied by the SDK.
+Portable ReadyToRun builds compile against the minimum .NET 8 runtime references. Self-contained installers bundle the current patched runtime supplied by the SDK. NAudio.Core's FFT assembly uses runtime compilation to avoid a native fail-fast seen with its precompiled code on some Windows systems; Winisland and its other assemblies keep their startup precompilation.
 
 For future releases, update the project version, add release notes under `docs/releases/v<version>.md`, commit to `main`, and push a matching `v<major>.<minor>.<patch>` tag. GitHub Actions verifies the app and self-contained payload, tests real installation and helper upgrades in its disposable Windows runner, then publishes the verified installer and checksum. The updater reads that release without requiring a GitHub account or token.
