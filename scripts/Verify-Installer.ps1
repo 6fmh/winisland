@@ -71,7 +71,11 @@ function Invoke-InstallerProcess([string]$Executable, [string]$Arguments) {
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
         if (!$process.WaitForExit(180000)) {
-            $process.Kill()
+            # On current PowerShell, include this test's owned descendants.
+            if ($process.GetType().GetMethod('Kill', [type[]]@([bool]))) { $process.Kill($true) }
+            else {
+                & "$env:SystemRoot/System32/taskkill.exe" /PID $process.Id /T /F *> (Join-Path $outputDirectory 'process-timeout-cleanup.log')
+            }
             $process.WaitForExit(5000) | Out-Null
             throw "Installer process timed out. See $outputDirectory"
         }
@@ -95,7 +99,14 @@ function Invoke-Setup([string]$InstallDirectory, [string]$LogName, [bool]$StartW
 }
 function Invoke-Uninstall([string]$InstallDirectory, [string]$LogName) {
     $arguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="{0}"' -f (Join-Path $outputDirectory $LogName)
-    $exitCode = Invoke-InstallerProcess (Join-Path $InstallDirectory 'unins000.exe') $arguments
+    $waitJob = Join-Path $outputDirectory ($LogName + '-wait.json')
+    [IO.File]::WriteAllText($waitJob, (@{
+        executable = Join-Path $InstallDirectory 'unins000.exe'; arguments = $arguments; fixtureDirectory = $outputDirectory
+        stdout = Join-Path $outputDirectory ($LogName + '-stdout.log'); stderr = Join-Path $outputDirectory ($LogName + '-stderr.log')
+    } | ConvertTo-Json))
+    $waitHelper = Join-Path $PSScriptRoot 'Invoke-InstallerWait.ps1'
+    $vmShell = (Get-Process -Id $PID).Path
+    $exitCode = Invoke-InstallerProcess $vmShell ('-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -JobPath "{1}" -AllowDesktopChanges' -f $waitHelper, $waitJob)
     Assert-Installer ($exitCode -eq 0) "Uninstall exits successfully ($LogName)"
     Assert-Installer (!(Test-Path -LiteralPath (Join-Path $InstallDirectory 'Winisland.exe'))) 'Uninstall removes the app executable'
     Assert-Installer ($null -eq (Get-SigninTask)) 'Uninstall removes the account-specific sign-in task'
@@ -126,15 +137,39 @@ function Stop-OwnedRestart {
 function Assert-SigninTask([string]$ApplicationPath) {
     $task = Get-SigninTask
     Assert-Installer ($null -ne $task) 'Creates an account-specific sign-in task'
+    $definition = $triggers = $trigger = $taskPrincipal = $taskSettings = $null
     try {
         [IO.File]::WriteAllText((Join-Path $outputDirectory 'signin-task.xml.log'), [string]$task.Xml)
         [xml]$xml = $task.Xml
-        Assert-Installer ($xml.Task.Triggers.LogonTrigger.Delay -eq 'PT0S' -and $xml.Task.Principals.Principal.RunLevel -eq 'LeastPrivilege' -and
-            $xml.Task.Principals.Principal.LogonType -eq 'InteractiveToken' -and $xml.Task.Settings.RunOnlyIfNetworkAvailable -eq 'false' -and
-            $xml.Task.Settings.DisallowStartIfOnBatteries -eq 'false') 'Sign-in task runs with no delay, network or battery gate and no elevation'
+        # Exported XML omits default values. Read effective Scheduler properties
+        # so missing PT0S/LeastPrivilege/false elements are not mistaken for gates.
+        $definition = $task.Definition
+        $triggers = $definition.Triggers
+        $trigger = $triggers.Item(1)
+        $taskPrincipal = $definition.Principal
+        $taskSettings = $definition.Settings
+        $delayText = [string]$trigger.Delay
+        $delay = if ([string]::IsNullOrEmpty($delayText)) { [TimeSpan]::Zero } else { [Xml.XmlConvert]::ToTimeSpan($delayText) }
+        $triggerIdentity = [string]$trigger.UserId
+        $triggerSid = if ($triggerIdentity.StartsWith('S-1-')) { $triggerIdentity } else { ([Security.Principal.NTAccount]::new($triggerIdentity)).Translate([Security.Principal.SecurityIdentifier]).Value }
+        $nativeSettings = [ordered]@{
+            triggerCount = [int]$triggers.Count; triggerType = [int]$trigger.Type; triggerEnabled = [bool]$trigger.Enabled; triggerUserSid = $triggerSid
+            delay = $delayText; delaySeconds = $delay.TotalSeconds; runLevel = [int]$taskPrincipal.RunLevel; logonType = [int]$taskPrincipal.LogonType
+            runOnlyIfNetworkAvailable = [bool]$taskSettings.RunOnlyIfNetworkAvailable
+            disallowStartIfOnBatteries = [bool]$taskSettings.DisallowStartIfOnBatteries; stopIfGoingOnBatteries = [bool]$taskSettings.StopIfGoingOnBatteries
+        }
+        [IO.File]::WriteAllText((Join-Path $outputDirectory 'signin-task-native.json'), ($nativeSettings | ConvertTo-Json))
+        Assert-Installer ($nativeSettings.triggerCount -eq 1 -and $nativeSettings.triggerType -eq 9 -and $nativeSettings.triggerEnabled -and
+            $nativeSettings.triggerUserSid -eq $taskName.Substring('Winisland-'.Length) -and $nativeSettings.delaySeconds -eq 0 -and
+            $nativeSettings.runLevel -eq 0 -and $nativeSettings.logonType -eq 3 -and !$nativeSettings.runOnlyIfNetworkAvailable -and
+            !$nativeSettings.disallowStartIfOnBatteries -and !$nativeSettings.stopIfGoingOnBatteries) 'Sign-in task runs with no delay, network or battery gate and no elevation'
         Assert-Installer ($xml.Task.Actions.Exec.Command -eq $ApplicationPath -and $xml.Task.Actions.Exec.Arguments -eq '--background') 'Sign-in task targets the installed background app'
         Assert-Installer (!($startup.GetValueNames() -contains 'Winisland')) 'Scheduled startup removes the legacy Run entry'
-    } finally { [Runtime.InteropServices.Marshal]::FinalReleaseComObject($task) | Out-Null }
+    } finally {
+        foreach ($comObject in @($taskSettings, $taskPrincipal, $trigger, $triggers, $definition, $task)) {
+            if ($null -ne $comObject -and [Runtime.InteropServices.Marshal]::IsComObject($comObject)) { [Runtime.InteropServices.Marshal]::FinalReleaseComObject($comObject) | Out-Null }
+        }
+    }
 }
 
 try {
