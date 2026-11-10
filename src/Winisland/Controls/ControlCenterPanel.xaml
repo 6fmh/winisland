@@ -1,0 +1,130 @@
+<UserControl x:Class="Winisland.Controls.ControlCenterPanel"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:controls="clr-namespace:Winisland.Controls"
+ Foreground="White" FontFamily="{StaticResource UiFont}" Focusable="False">
+ <UserControl.Resources><ResourceDictionary>
+  <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="NotchStyles.xaml"/></ResourceDictionary.MergedDictionaries>
+  <Style x:Key="ControlCard" TargetType="Border">
+   <Setter Property="Background"><Setter.Value><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#29292B" Offset="0"/><GradientStop Color="#202022" Offset="1"/></LinearGradientBrush></Setter.Value></Setter>
+   <Setter Property="CornerRadius" Value="32"/>
+   <Setter Property="BorderBrush"><Setter.Value><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#45FFFFFF" Offset="0"/><GradientStop Color="#18FFFFFF" Offset="1"/></LinearGradientBrush></Setter.Value></Setter><Setter Property="BorderThickness" Value="1"/>
+  </Style>
+  <Style x:Key="RadioCard" TargetType="Border" BasedOn="{StaticResource ControlCard}">
+   <Setter Property="CornerRadius" Value="24"/>
+  </Style>
+  <Style x:Key="ControlRadio" TargetType="ToggleButton">
+   <Setter Property="Foreground" Value="White"/><Setter Property="Cursor" Value="Hand"/>
+   <Setter Property="FocusVisualStyle" Value="{StaticResource NotchFocus}"/>
+   <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton">
+    <Border x:Name="Surface" CornerRadius="12" Background="Transparent" Padding="10,5,0,5" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}">
+     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition/></Grid.ColumnDefinitions>
+      <Border x:Name="Well" Width="34" Height="34" CornerRadius="17" Background="#3A3A3C" HorizontalAlignment="Left" VerticalAlignment="Center">
+       <controls:NotchIcon x:Name="Glyph" Kind="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" Width="20" Height="20" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Border>
+      <ContentPresenter Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Stretch"/>
+     </Grid>
+    </Border>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsChecked" Value="True"><Setter TargetName="Well" Property="Background" Value="White"/><Setter TargetName="Glyph" Property="Foreground" Value="{StaticResource KeyboardFocusBlue}"/></Trigger>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="#10FFFFFF"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.7"/></Trigger>
+     <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Surface" Property="Opacity" Value="0.55"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="ControlShortcut" TargetType="Button" BasedOn="{StaticResource NotchButton}">
+   <Setter Property="Background" Value="{StaticResource ControlFill}"/><Setter Property="Padding" Value="6"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+    <Border x:Name="Surface" Background="{TemplateBinding Background}" BorderBrush="{StaticResource Separator}" BorderThickness="1" CornerRadius="32" Padding="{TemplateBinding Padding}" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}">
+     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    </Border>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="{StaticResource ControlHoverFill}"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.7"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+ </ResourceDictionary></UserControl.Resources>
+ <Grid>
+  <Grid.RowDefinitions><RowDefinition Height="28"/><RowDefinition Height="10"/><RowDefinition Height="156"/><RowDefinition Height="10"/><RowDefinition Height="64"/><RowDefinition/></Grid.RowDefinitions>
+  <Grid>
+   <TextBlock Text="Control Center" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center"/>
+   <Button x:Name="WindowsSettingsButton" Style="{StaticResource NotchQuietButton}" HorizontalAlignment="Right" FontSize="11" Padding="8,2" MinHeight="28" Click="OnSettingsShortcut" Tag="ms-settings:" ToolTip="Open Windows settings" AutomationProperties.Name="Open Windows settings">
+    <StackPanel Orientation="Horizontal"><TextBlock Text="Windows settings" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/><controls:NotchIcon Kind="ChevronRight" Width="11" Height="11" Foreground="{StaticResource Muted}" Margin="5,0,0,0" VerticalAlignment="Center"/></StackPanel>
+   </Button>
+  </Grid>
+  <Grid Grid.Row="2">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="230"/><ColumnDefinition Width="10"/><ColumnDefinition/></Grid.ColumnDefinitions>
+   <Grid><Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+    <Border Style="{StaticResource RadioCard}" Margin="0,0,0,6">
+     <Grid Margin="3,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+      <ToggleButton x:Name="WifiPower" Style="{StaticResource ControlRadio}" Tag="{x:Static controls:NotchIconKind.Wifi}" Click="OnWifiToggle" IsEnabled="False" AutomationProperties.Name="Wi-Fi">
+       <StackPanel><TextBlock Text="Wi-Fi" FontSize="13" FontWeight="SemiBold"/><TextBlock x:Name="WifiDetail" Text="Checking…" FontSize="10" Foreground="{StaticResource SecondaryLabel}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/></StackPanel>
+      </ToggleButton>
+      <Button x:Name="WifiSettingsButton" Grid.Column="1" Style="{StaticResource NotchIconButton}" Tag="ms-settings:network-wifi" Click="OnSettingsShortcut" ToolTip="Choose a network in Windows settings" AutomationProperties.Name="Choose a Wi-Fi network"><controls:NotchIcon Kind="ChevronRight" Width="12" Height="12" Foreground="{StaticResource Muted}"/></Button>
+     </Grid>
+    </Border>
+    <Border Grid.Row="1" Style="{StaticResource RadioCard}" Margin="0,0,0,6">
+     <Grid Margin="3,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+      <ToggleButton x:Name="BluetoothPower" Style="{StaticResource ControlRadio}" Tag="{x:Static controls:NotchIconKind.Bluetooth}" Click="OnBluetoothToggle" IsEnabled="False" AutomationProperties.Name="Bluetooth">
+       <StackPanel><TextBlock Text="Bluetooth" FontSize="13" FontWeight="SemiBold"/><TextBlock x:Name="BluetoothDetail" Text="Checking…" FontSize="10" Foreground="{StaticResource SecondaryLabel}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/></StackPanel>
+      </ToggleButton>
+      <Button Grid.Column="1" Style="{StaticResource NotchIconButton}" Tag="ms-settings:bluetooth" Click="OnSettingsShortcut" ToolTip="Manage Bluetooth devices in Windows settings" AutomationProperties.Name="Manage Bluetooth devices"><controls:NotchIcon Kind="ChevronRight" Width="12" Height="12" Foreground="{StaticResource Muted}"/></Button>
+     </Grid>
+    </Border>
+    <Border Grid.Row="2" Style="{StaticResource RadioCard}">
+     <Button Style="{StaticResource NotchQuietButton}" Tag="ms-settings:network-airplanemode" Click="OnSettingsShortcut" Padding="13,5,9,5" HorizontalContentAlignment="Stretch" ToolTip="Open Airplane mode in Windows settings" AutomationProperties.Name="Open Airplane mode settings">
+      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition/><ColumnDefinition Width="20"/></Grid.ColumnDefinitions>
+       <Border Width="34" Height="34" CornerRadius="17" Background="#3A3A3C" HorizontalAlignment="Left"><controls:NotchIcon Kind="Airplane" Width="20" Height="20" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+       <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="Airplane mode" FontSize="13" FontWeight="SemiBold"/><TextBlock Text="Open settings" FontSize="10" Foreground="{StaticResource SecondaryLabel}" Margin="0,2,0,0"/></StackPanel>
+       <controls:NotchIcon Grid.Column="2" Kind="ChevronRight" Width="12" Height="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+      </Grid>
+     </Button>
+    </Border>
+   </Grid>
+   <Grid Grid.Column="2"><Grid.RowDefinitions><RowDefinition/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
+    <Border Style="{StaticResource ControlCard}" Padding="14,7,10,5">
+     <Grid><Grid.RowDefinitions><RowDefinition Height="26"/><RowDefinition/></Grid.RowDefinitions>
+      <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="42"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions>
+       <TextBlock Text="Brightness" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+       <TextBlock x:Name="BrightnessValue" Grid.Column="1" Text="—" FontSize="10" Foreground="{StaticResource SecondaryLabel}" VerticalAlignment="Center" TextAlignment="Right" Typography.NumeralAlignment="Tabular"/>
+       <Button Grid.Column="2" Width="24" Height="24" MinHeight="24" Style="{StaticResource NotchIconButton}" Click="OnSettingsShortcut" Tag="ms-settings:display" ToolTip="Display settings" AutomationProperties.Name="Open display settings"><controls:NotchIcon Kind="ChevronRight" Width="11" Height="11" Foreground="{StaticResource Muted}"/></Button>
+      </Grid>
+      <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="25"/><ColumnDefinition/></Grid.ColumnDefinitions>
+       <controls:NotchIcon Kind="Sun" Width="18" Height="18" VerticalAlignment="Center"/>
+       <controls:VolumeSlider x:Name="BrightnessSlider" Grid.Column="1" Height="32" Style="{StaticResource VolumeSliderStyle}" Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" IsEnabled="False" ValueChanged="OnBrightnessChanged" AutomationProperties.Name="Display brightness"/>
+       <TextBlock x:Name="BrightnessUnavailable" Grid.Column="1" Text="Use your display's controls" FontSize="10" Foreground="{StaticResource SecondaryLabel}" VerticalAlignment="Center" Visibility="Collapsed" IsHitTestVisible="False"/>
+      </Grid>
+     </Grid>
+    </Border>
+    <Border Grid.Row="2" Style="{StaticResource ControlCard}" Padding="14,7,10,5">
+     <Grid><Grid.RowDefinitions><RowDefinition Height="26"/><RowDefinition/></Grid.RowDefinitions>
+      <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="42"/><ColumnDefinition Width="24"/></Grid.ColumnDefinitions>
+       <TextBlock Text="Sound" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+       <TextBlock x:Name="SoundValue" Grid.Column="1" Text="—" FontSize="10" Foreground="{StaticResource SecondaryLabel}" VerticalAlignment="Center" TextAlignment="Right" Typography.NumeralAlignment="Tabular"/>
+       <Button Grid.Column="2" Width="24" Height="24" MinHeight="24" Style="{StaticResource NotchIconButton}" Tag="ms-settings:sound" Click="OnSettingsShortcut" ToolTip="Choose an output device in Windows settings" AutomationProperties.Name="Choose a sound output"><controls:NotchIcon Kind="ChevronRight" Width="11" Height="11" Foreground="{StaticResource Muted}"/></Button>
+      </Grid>
+      <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="25"/><ColumnDefinition/></Grid.ColumnDefinitions>
+       <Button x:Name="SystemMuteButton" Width="25" Height="30" MinHeight="30" Style="{StaticResource NotchIconButton}" Click="OnMuteClick" IsEnabled="False" AutomationProperties.Name="Mute system sound"><controls:NotchIcon x:Name="SystemSoundGlyph" Kind="Speaker" Width="18" Height="18"/></Button>
+       <controls:VolumeSlider x:Name="SystemVolumeSlider" Grid.Column="1" Height="32" Style="{StaticResource VolumeSliderStyle}" Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" IsEnabled="False" ValueChanged="OnVolumeChanged" ToolTip="Windows system volume" AutomationProperties.Name="Windows system volume" AutomationProperties.HelpText="Changes the default Windows output volume."/>
+      </Grid>
+     </Grid>
+    </Border>
+   </Grid>
+  </Grid>
+  <UniformGrid Grid.Row="4" Columns="4">
+   <Button x:Name="FocusShortcut" Style="{StaticResource ControlShortcut}" Margin="0,0,5,0" Click="OnFocusClick" ToolTip="Open the focus timer" AutomationProperties.Name="Open focus timer"><StackPanel><controls:NotchIcon Kind="Moon" Width="22" Height="22" HorizontalAlignment="Center"/><TextBlock Text="Focus timer" FontSize="11" Margin="0,6,0,0" TextAlignment="Center"/></StackPanel></Button>
+   <Button Style="{StaticResource ControlShortcut}" Margin="5,0" Tag="ms-settings:nightlight" Click="OnSettingsShortcut" ToolTip="Open Night light in Windows settings" AutomationProperties.Name="Open Night light settings"><StackPanel><controls:NotchIcon Kind="Sun" Width="22" Height="22" HorizontalAlignment="Center"/><TextBlock Text="Night light" FontSize="11" Margin="0,6,0,0" TextAlignment="Center"/></StackPanel></Button>
+   <Button Style="{StaticResource ControlShortcut}" Margin="5,0" Tag="ms-settings:display" Click="OnSettingsShortcut" ToolTip="Display and screen settings" AutomationProperties.Name="Open display settings"><StackPanel><controls:NotchIcon Kind="Display" Width="22" Height="22" HorizontalAlignment="Center"/><TextBlock Text="Display" FontSize="11" Margin="0,6,0,0" TextAlignment="Center"/></StackPanel></Button>
+   <Button x:Name="CaptureShortcut" Style="{StaticResource ControlShortcut}" Margin="5,0,0,0" Tag="ms-screenclip:" Click="OnSettingsShortcut" ToolTip="Capture part of your screen" AutomationProperties.Name="Capture screenshot"><StackPanel><controls:NotchIcon Kind="Capture" Width="22" Height="22" HorizontalAlignment="Center"/><TextBlock Text="Capture" FontSize="11" Margin="0,6,0,0" TextAlignment="Center"/></StackPanel></Button>
+  </UniformGrid>
+  <Grid Grid.Row="5" Margin="0,4,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <TextBlock x:Name="ControlStatus" Text="System controls" FontSize="10" Foreground="{StaticResource SecondaryLabel}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" AutomationProperties.LiveSetting="Polite"/>
+   <Button Grid.Column="1" Style="{StaticResource NotchQuietButton}" Padding="8,2" FontSize="10" MinHeight="28" Tag="ms-settings:powersleep" Click="OnSettingsShortcut" ToolTip="Power and battery settings" AutomationProperties.Name="Open power and battery settings">
+    <StackPanel Orientation="Horizontal"><controls:NotchIcon x:Name="PowerGlyph" Kind="Power" Width="14" Height="14" Foreground="{StaticResource SecondaryLabel}" VerticalAlignment="Center"/><TextBlock x:Name="PowerDetail" Text="Power" FontSize="10" Foreground="{StaticResource SecondaryLabel}" VerticalAlignment="Center" Margin="5,0,0,0"/></StackPanel>
+   </Button>
+  </Grid>
+ </Grid>
+</UserControl>

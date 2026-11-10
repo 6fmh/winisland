@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Winisland Player Companion",
+  "version": "0.4.0",
+  "description": "Control the current website player's own volume from your Winisland notch. Local connection only.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3bV6GF7ABcryZg671I1qbLKE+P6IFcb9E/wGSDzAjjXN0k2K5nbl7Mm2AkX6nFmZkY8raIzpux31MkLlhpAF7Mmf2BPpVsKTUXmOM3QdJqxACOH4aHas3eUwtltqAbktLq5q03TelS1/SUeyaqs6FeaOUYyvszeHC/ioYUfATjJQR9jzotMEwjcr+OXXucGMK/CPOu5gSQ+zWtUNuN/Eoq5J4LjuSOzcDPXOjpUNzPvjJ45tRIGil0H8Ti7oJQfbzfP61/hhXzkQRduObdLhHV70Xu8zhfnGaT1wnRZ2GYL85ecqySvk9vl+fwfMHb1nhYaosfHYLmNjWfhWOzTtOwIDAQAB",
+  "permissions": ["nativeMessaging"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Winisland Player Companion", "default_popup": "popup.html" },
+  "icons": { "32": "icon32.png", "128": "icon128.png" },
+  "content_scripts": [
+    { "matches": ["http://*/*", "https://*/*"], "js": ["player-main.js"], "run_at": "document_start", "all_frames": true, "match_about_blank": true, "world": "MAIN" },
+    { "matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_start", "all_frames": true, "match_about_blank": true, "world": "ISOLATED" }
+  ]
+}

@@ -1,0 +1,25 @@
+# Apple typography, icon, and control audit
+
+Researched November 9, 2026. This supplements [the existing visual research](research/macos-visuals.md) with current Apple documentation and menu-bar imagery. The MacBook camera housing itself contains no text or controls; the expandable Winisland content uses macOS visual conventions and the existing Boring Notch panel reference.
+
+## Sources inspected
+
+- [Apple Typography HIG](https://developer.apple.com/design/human-interface-guidelines/typography.md): SF Pro is the macOS system font; default 13 pt, minimum 10 pt; regular, medium and semibold weights for small text; size-specific optical designs and matching icon weights.
+- [Apple Fonts](https://developer.apple.com/fonts/): the downloadable San Francisco font license permits Apple-platform mockups and prohibits embedding the font in software. The existing bundled Inter 4.1 text family and Inter Display large numerals remain the distributable Windows approximation, with the limits recorded in [font provenance](../src/Winisland/Assets/Fonts/README.md).
+- [Apple SF Symbols HIG](https://developer.apple.com/design/human-interface-guidelines/sf-symbols.md): monochrome layers, nine corresponding text weights, three relative scales, meaningful fill variants, and variable speaker-wave layers for changing sound levels.
+- [Apple Menu Bar HIG](https://developer.apple.com/design/human-interface-guidelines/the-menu-bar.md), including [the current dark menu-bar reference](https://developer.apple.com/tutorials/images/com.apple.HIG/menu-bar-extras~dark@2x.png): round-capped white Wi-Fi/search marks and a two-switch Control Center icon, with an outlined upper switch and a filled lower switch with a clear knob. The menu bar is 24 logical points high.
+- [Apple Color HIG](https://developer.apple.com/design/human-interface-guidelines/color.md): current unified dark swatches specify blue RGB 0/145/255, orange 255/146/48, cyan 60/211/254 and green 48/209/88. Native semantic neutrals vary with background, OS and accessibility; fixed black-overlay fills are deliberate Windows adaptations.
+- [Apple Buttons HIG](https://developer.apple.com/design/human-interface-guidelines/buttons.md): icon actions retain a clickable area outside the drawing, with about 10 pixels of padding where space permits, and accessible hover help.
+
+Google Custom Search was attempted before edits and returned HTTP 403 (`PERMISSION_DENIED`: project does not have access to the Custom Search JSON API). A text-only Google HTTP query returned the consent page. Actual design evidence above was fetched directly from Apple's official HTML, Markdown and structured HIG content. No browser or UI was opened on the interactive desktop. Two reference PNGs were downloaded into `artifacts/research/apple-type-icons/` for inspection, without shipping them as application artwork.
+
+## Applied changes
+
+- Shared text uses grayscale antialiasing for the transparent Windows overlay, preserving its bundled Inter typography and 13-DIP body hierarchy. Large editable timer numerals explicitly use tabular figures to keep changing times aligned.
+- The notch palette now exposes common semantic resources for neutral control, selected and hover fills, tracks, borders, separators and secondary labels. Secondary white is 60% opacity, keeping small labels legible over both black and the control fill. Focus, cyan activity and green status colors use the inspected current Apple dark swatches. A blue keyboard focus ring remains available.
+- The playback template preserves the reference's 30-point skip and 40-point play hover capsules, and adds a transparent outer hit surface across the complete existing 40/50-DIP button area. Clicking the space outside the capsule can now reach the same control.
+- Independently authored vectors replace the generic slider mark with the observed two-switch Control Center silhouette, use filled speaker/airplane/moon variants, and draw clean Wi-Fi arcs with a filled dot. Round strokes remain consistent across small monochrome glyphs.
+- Battery and skip marks have their own wide intrinsic drawing bounds. They no longer shrink to the height of a square box. Changing icon kind invalidates the cached transform so a speaker-to-battery change cannot retain the wrong aspect ratio.
+- Battery fill uses the actual percentage through `BatteryLevel`, and speaker waves show zero, one, two or three active layers through `SoundLevel`. Both properties clamp to 0–100 and treat nonfinite values as zero. Data owners supply the actual system/player values; unknown battery percentages are supplied as zero rather than implying a full charge. Charging keeps its centered lightning mark clear of the outer shell.
+
+These are original native WPF drawings, not redistributed SF Symbols artwork. The neutral fills, stroke width and Inter metrics are evidence-guided adaptations, not claims that Windows reproduces every dynamic macOS rasterization detail exactly. Full private-desktop rendering and runtime verification are performed on the integrated candidate.

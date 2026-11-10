@@ -1,0 +1,106 @@
+name: Verify and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Check release version
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content src/Winisland/Winisland.csproj)).Project.PropertyGroup.Version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version.' }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag must match project version.' }
+      - name: Verify native application on a private desktop
+        shell: pwsh
+        run: ./scripts/Build.ps1 -Verify
+      - name: Verify first-notch startup and player integration
+        shell: pwsh
+        run: |
+          ./scripts/Invoke-Verification.ps1 -ExecutablePath artifacts/verification/candidate/win-x64/Winisland.exe -Suite Startup -OutputDirectory artifacts/startup-verification
+          ./scripts/Invoke-Verification.ps1 -ExecutablePath artifacts/verification/candidate/win-x64/Winisland.exe -Suite Spotify -OutputDirectory artifacts/spotify-verification
+          node scripts/Verify-BrowserCompanion.mjs
+          node scripts/Verify-BrowserSafety.mjs
+      - name: Install Inno Setup compiler
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe')) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Could not install Inno Setup.' }
+          }
+      - name: Build and verify self-contained installer payload
+        shell: pwsh
+        run: ./scripts/Build-Installer.ps1 -Verify
+      - name: Install, rollback, helper-upgrade and uninstall in disposable Windows VM
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem dist/installer/Winisland-Setup-*-win-x64.exe)
+          if ($installers.Count -ne 1) { throw 'Expected one release installer.' }
+          ./scripts/Verify-Installer.ps1 -InstallerPath $installers[0].FullName -AllowDesktopChanges
+      - name: Upload verified installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: dist/installer/*
+          if-no-files-found: error
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification
+          path: |
+            artifacts/verification/*.json
+            artifacts/verification/*.png
+            artifacts/verification/*.log
+            artifacts/startup-verification/**
+            artifacts/spotify-verification/*.json
+            artifacts/installer-verification/**/*.json
+            artifacts/installer-verification/**/*.log
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: verify
+    runs-on: windows-2025
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer
+          path: dist/installer
+      - name: Publish verified installer and checksum
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $notes = Join-Path 'docs/releases' ($env:RELEASE_TAG + '.md')
+          $assets = @(Get-ChildItem dist/installer/* | ForEach-Object FullName)
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG @assets --clobber
+          } elseif (Test-Path -LiteralPath $notes) {
+            gh release create $env:RELEASE_TAG @assets --verify-tag --draft --title "Winisland $($env:RELEASE_TAG.Substring(1))" --notes-file $notes
+          } else {
+            gh release create $env:RELEASE_TAG @assets --verify-tag --draft --title "Winisland $($env:RELEASE_TAG.Substring(1))" --generate-notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Release asset publication failed.' }
+          gh release edit $env:RELEASE_TAG --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }

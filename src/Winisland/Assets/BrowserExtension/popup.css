@@ -1,0 +1,13 @@
+:root { color-scheme:dark; font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+body { margin:0; width:300px; background:#101012; color:#fafafa; }
+main { padding:24px; }
+.mark { height:28px; display:flex; align-items:flex-start; justify-content:center; margin-bottom:20px; }
+.mark span { width:100px; height:22px; background:#000; border-radius:0 0 10px 10px; box-shadow:0 2px 14px #0008; }
+h1 { margin:0 0 10px; font-size:21px; font-weight:600; letter-spacing:-.5px; }
+p { font-size:12px; line-height:1.55; margin:0 0 14px; }
+#status { color:#a5c9ff; }
+.detail { color:#c4c4cb; }
+button { width:100%; padding:11px 14px; color:white; background:#287ff0; border:0; border-radius:11px; font:inherit; font-size:12px; font-weight:600; cursor:pointer; transition:background-color .15s,transform .15s; }
+button:hover { background:#3d8efa; } button:active { transform:scale(.98); } button:focus-visible { outline:2px solid white; outline-offset:3px; }
+.privacy { color:#8e8e95; font-size:10px; margin:17px 0 0; }
+@media(prefers-reduced-motion:reduce) { button { transition:none; } button:active { transform:none; } }

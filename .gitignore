@@ -1,0 +1,16 @@
+.tools/
+**/bin/
+**/obj/
+artifacts/
+dist/
+.vs/
+*.user
+*.suo
+communication.md
+AGENTS.md
+agents.md
+.env
+.env.*
+upload-connection.bin
+upload-token.bin
+spotify-account.bin

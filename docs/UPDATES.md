@@ -1,0 +1,19 @@
+# Updates and startup
+
+Winisland checks the public stable release at `https://api.github.com/repos/6fmh/winisland/releases/latest` ten seconds after first paint, then every four hours. Checking never delays the notch. Use the tray's **Check for updates**, **Settings → About → Check for updates**, or **Ctrl+7** while pinned for a manual check.
+
+A newer release shows a cyan Update indicator in the closed notch and a Software update tab. Open the tab and choose **Update and restart**. Progress reports downloaded bytes. **Cancel** stops the download and leaves the release available for later. Network and validation errors stay in the tab and allow retry; the running app remains open until the helper confirms it is ready.
+
+The updater selects an exact `Winisland-Setup-<version>-<architecture>.exe` asset and its `.sha256` sidecar from this repository. It rejects prereleases, drafts, downgrades, foreign asset URLs, invalid sizes and mismatched checksums. Downloads use HTTPS with bounded GitHub redirects. GitHub's SHA-256 asset digests, when present, must agree with the sidecar and downloaded bytes. This provides download integrity and trusts releases published by the repository owner; it is not Authenticode signing.
+
+After verification, a copy of the app acts as a temporary helper. It checks the installer again, confirms the originating process identity, waits for that process to exit, runs Inno Setup silently in the current application directory, preserves the startup preference, and restarts with `--background`. A setup failure is recorded locally and an already-exited app is restarted when safe. Settings and credentials remain in the account's data directory. Full helper/install/upgrade/uninstall checks run only on disposable Windows machines, using `scripts/Verify-Installer.ps1 -AllowDesktopChanges`.
+
+**Start with Windows** uses a Task Scheduler logon trigger for the current account, without a delay, network prerequisite, battery restriction, saved password or elevation. The old app-specific Run entry is removed after registration succeeds. Failed settings commits restore the previous task and Run entry. An enabled legacy preference migrates after first paint. The installer initially offers startup enabled; its checkbox and Settings can disable it. Windows still controls when a sign-in trigger runs, so this is not a guarantee about total PC boot time.
+
+Startup verification uses `scripts/Invoke-Verification.ps1 -Suite Startup` on a private desktop. It measures worker-process creation to the first rendered native notch, checks that integrations and secondary panels did not run first, and opens the real deferred calendar and Control Center. These measurements exclude Windows sign-in scheduling.
+
+Three fresh x64 workers on the development machine rendered the first notch in 417–440 ms, compared with 676–719 ms before these changes (about 39% faster on average). Both deferred panels passed their first-use checks. These local measurements are not a PC boot-time guarantee.
+
+Portable ReadyToRun builds compile against the minimum .NET 8 runtime references so the precompiled code also works with older installed .NET 8 patches. Self-contained installers bundle the current patched runtime supplied by the SDK.
+
+For future releases, update the project version, add release notes under `docs/releases/v<version>.md`, commit to `main`, and push a matching `v<major>.<minor>.<patch>` tag. GitHub Actions verifies the app and self-contained payload, tests real installation and helper upgrades in its disposable Windows runner, then publishes the verified installer and checksum. The updater reads that release without requiring a GitHub account or token.
