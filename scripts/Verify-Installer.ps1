@@ -55,21 +55,26 @@ function Assert-Installer([bool]$Condition, [string]$Name) {
     if (!$Condition) { throw "Installer verification failed: $Name" }
     Write-Output "PASS: $Name"
 }
-function Invoke-InstallerProcess([string]$Executable, [string]$Arguments) {
+function Invoke-InstallerProcess([string]$Executable, [string]$Arguments, [switch]$FileBackedResult) {
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $Executable
     $start.Arguments = $Arguments
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
+    # A restarted app inherits console pipes. The update helper already writes
+    # update-result.json and profile logs; waiting for its console EOF would
+    # wait for the app that the verifier must subsequently inspect and stop.
+    $start.RedirectStandardOutput = !$FileBackedResult
+    $start.RedirectStandardError = !$FileBackedResult
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $start
     try {
         if (!$process.Start()) { throw 'Could not start installer process.' }
-        $stdout = $process.StandardOutput.ReadToEndAsync()
-        $stderr = $process.StandardError.ReadToEndAsync()
+        if (!$FileBackedResult) {
+            $stdout = $process.StandardOutput.ReadToEndAsync()
+            $stderr = $process.StandardError.ReadToEndAsync()
+        }
         if (!$process.WaitForExit(180000)) {
             # On current PowerShell, include this test's owned descendants.
             if ($process.GetType().GetMethod('Kill', [type[]]@([bool]))) { $process.Kill($true) }
@@ -79,8 +84,10 @@ function Invoke-InstallerProcess([string]$Executable, [string]$Arguments) {
             $process.WaitForExit(5000) | Out-Null
             throw "Installer process timed out. See $outputDirectory"
         }
-        $stdout.GetAwaiter().GetResult() | Out-File -LiteralPath (Join-Path $outputDirectory 'process-stdout.log') -Append
-        $stderr.GetAwaiter().GetResult() | Out-File -LiteralPath (Join-Path $outputDirectory 'process-stderr.log') -Append
+        if (!$FileBackedResult) {
+            $stdout.GetAwaiter().GetResult() | Out-File -LiteralPath (Join-Path $outputDirectory 'process-stdout.log') -Append
+            $stderr.GetAwaiter().GetResult() | Out-File -LiteralPath (Join-Path $outputDirectory 'process-stderr.log') -Append
+        }
         return $process.ExitCode
     } finally { $process.Dispose() }
 }
@@ -235,7 +242,7 @@ try {
             $plan = @{ Package = @{ InstallerPath = $stagedInstaller; Sha256 = (Get-FileHash -LiteralPath $stagedInstaller -Algorithm SHA256).Hash.ToLowerInvariant(); Version = [string]$version };
                 ParentId = [int]::MaxValue; ParentStartedUtcTicks = 0; ApplicationPath = $application; InstallDirectory = $activeInstallDirectory }
             [IO.File]::WriteAllText($planPath, ($plan | ConvertTo-Json -Depth 5))
-            $exitCode = Invoke-InstallerProcess $helper ('--apply-update "{0}"' -f $planPath)
+            $exitCode = Invoke-InstallerProcess $helper ('--apply-update "{0}"' -f $planPath) -FileBackedResult
             $outcomePath = Join-Path $env:WINISLAND_DATA_DIR 'update-result.json'
             $outcome = Get-Content -LiteralPath $outcomePath -Raw | ConvertFrom-Json
             $ownedRestartPid = $outcome.restartedPid
