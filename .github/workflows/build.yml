@@ -14,6 +14,8 @@ jobs:
   verify:
     runs-on: windows-2025
     timeout-minutes: 25
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -54,46 +56,36 @@ jobs:
           $installers = @(Get-ChildItem dist/installer/Winisland-Setup-*-win-x64.exe)
           if ($installers.Count -ne 1) { throw 'Expected one release installer.' }
           ./scripts/Verify-Installer.ps1 -InstallerPath $installers[0].FullName -AllowDesktopChanges
-      - name: Upload verified installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: installer
-          path: dist/installer/*
-          if-no-files-found: error
-      - name: Upload verification evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: verification
-          path: |
-            artifacts/verification/*.json
-            artifacts/verification/*.png
-            artifacts/verification/*.log
-            artifacts/startup-verification/**
-            artifacts/spotify-verification/*.json
-            artifacts/installer-verification/**/*.json
-            artifacts/installer-verification/**/*.log
-          retention-days: 14
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: verify
-    runs-on: windows-2025
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: installer
-          path: dist/installer
       - name: Publish verified installer and checksum
+        if: startsWith(github.ref, 'refs/tags/v')
+        timeout-minutes: 5
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
+          # Publish from the runner that passed every check. Actions artifact
+          # storage is optional diagnostic archival, not a release dependency.
+          $version = ([xml](Get-Content src/Winisland/Winisland.csproj)).Project.PropertyGroup.Version
+          $installer = Join-Path 'dist/installer' "Winisland-Setup-$version-win-x64.exe"
+          $expectedHash = ((Get-Content -LiteralPath ($installer + '.sha256') -Raw).Trim() -split '\s+')[0]
+          $actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $expectedHash) { throw 'Verified installer checksum mismatch.' }
+          $evidenceDirectory = 'artifacts/release-evidence'
+          New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
+          $reportDirectories = @('artifacts/verification', 'artifacts/startup-verification', 'artifacts/spotify-verification', 'artifacts/installer-verification')
+          foreach ($directory in $reportDirectories) {
+            foreach ($file in (Get-ChildItem -LiteralPath $directory -Recurse -File)) {
+              if ($file.Extension -notin '.json', '.png', '.log') { continue }
+              $relative = [IO.Path]::GetRelativePath((Get-Location).Path, $file.FullName)
+              $destination = Join-Path $evidenceDirectory $relative
+              New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+              Copy-Item -LiteralPath $file.FullName -Destination $destination
+            }
+          }
+          @{ tag = $env:RELEASE_TAG; sourceCommit = $env:GITHUB_SHA; version = $version; installerSHA256 = $actualHash; runUrl = "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidenceDirectory 'provenance.json') -Encoding utf8
+          Compress-Archive -Path "$evidenceDirectory/*" -DestinationPath "dist/installer/Winisland-Verification-$version.zip"
           $notes = Join-Path 'docs/releases' ($env:RELEASE_TAG + '.md')
           $assets = @(Get-ChildItem dist/installer/* | ForEach-Object FullName)
           gh release view $env:RELEASE_TAG *> $null
@@ -107,3 +99,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Release asset publication failed.' }
           gh release edit $env:RELEASE_TAG --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
+      - name: Archive verification evidence
+        if: always() && (!startsWith(github.ref, 'refs/tags/v') || failure())
+        timeout-minutes: 2
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification
+          path: |
+            artifacts/verification/*.json
+            artifacts/verification/*.png
+            artifacts/verification/*.log
+            artifacts/startup-verification/**
+            artifacts/spotify-verification/*.json
+            artifacts/installer-verification/**/*.json
+            artifacts/installer-verification/**/*.log
+          retention-days: 14
