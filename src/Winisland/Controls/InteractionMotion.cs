@@ -16,6 +16,8 @@ public static class InteractionMotion
         "Pressed", typeof(bool), typeof(InteractionMotion), new PropertyMetadata(false));
     private static readonly DependencyProperty OwnerMotionProperty = DependencyProperty.RegisterAttached(
         "OwnerMotion", typeof(OwnerMotion), typeof(InteractionMotion), new PropertyMetadata(null));
+    private static readonly DependencyProperty AnimationClockProperty = DependencyProperty.RegisterAttached(
+        "AnimationClock", typeof(AnimationClock), typeof(InteractionMotion), new PropertyMetadata(null));
 
     public static bool GetEnabled(DependencyObject element) => (bool)element.GetValue(EnabledProperty);
     public static void SetEnabled(DependencyObject element, bool value) => element.SetValue(EnabledProperty, value);
@@ -27,8 +29,6 @@ public static class InteractionMotion
         {
             element.RenderTransformOrigin = new Point(0.5, 0.5);
             element.RenderTransform = new ScaleTransform(1, 1);
-            element.MouseEnter += OnEnter;
-            element.MouseLeave += OnLeave;
             element.PreviewMouseLeftButtonDown += OnPress;
             element.PreviewMouseLeftButtonUp += OnRelease;
             element.LostMouseCapture += OnCaptureLost;
@@ -41,8 +41,6 @@ public static class InteractionMotion
         }
         else
         {
-            element.MouseEnter -= OnEnter;
-            element.MouseLeave -= OnLeave;
             element.PreviewMouseLeftButtonDown -= OnPress;
             element.PreviewMouseLeftButtonUp -= OnRelease;
             element.LostMouseCapture -= OnCaptureLost;
@@ -73,23 +71,13 @@ public static class InteractionMotion
     private static void Reset(FrameworkElement element)
     {
         element.SetValue(PressedProperty, false);
+        element.ClearValue(AnimationClockProperty);
         if (element.RenderTransform is not ScaleTransform scale) return;
         scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
         scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
         scale.ScaleX = scale.ScaleY = 1;
     }
 
-    private static double HoverScale(FrameworkElement element) => element.IsEnabled ? 1.025 : 1;
-    private static void OnEnter(object sender, MouseEventArgs args)
-    {
-        var element = (FrameworkElement)sender;
-        if (!(bool)element.GetValue(PressedProperty)) Animate(element, HoverScale(element), 150);
-    }
-    private static void OnLeave(object sender, MouseEventArgs args)
-    {
-        var element = (FrameworkElement)sender;
-        if (!(bool)element.GetValue(PressedProperty)) Animate(element, 1, 130);
-    }
     private static void OnPress(object sender, MouseButtonEventArgs args)
     {
         var element = (FrameworkElement)sender;
@@ -100,9 +88,11 @@ public static class InteractionMotion
     }
     private static void Press(FrameworkElement element)
     {
-        if (!element.IsEnabled) return;
+        if (!element.IsEnabled || (bool)element.GetValue(PressedProperty)) return;
         element.SetValue(PressedProperty, true);
-        Animate(element, 0.94, 70);
+        // Pointer hover is already conveyed by the control's fill. Keep text
+        // at native size until an intentional press, with subdued desktop motion.
+        Animate(element, 0.97, 80);
     }
     private static void OnRelease(object sender, MouseButtonEventArgs args)
     {
@@ -118,7 +108,7 @@ public static class InteractionMotion
     {
         if (!(bool)element.GetValue(PressedProperty)) return;
         element.SetValue(PressedProperty, false);
-        Animate(element, element.IsMouseOver ? HoverScale(element) : 1, 170);
+        Animate(element, 1, 150);
     }
 
     private sealed class OwnerMotion
@@ -127,6 +117,9 @@ public static class InteractionMotion
         private readonly MouseButtonEventHandler _press;
         private readonly MouseButtonEventHandler _release;
         private readonly MouseEventHandler _captureLost;
+        private readonly KeyEventHandler _keyDown;
+        private readonly KeyEventHandler _keyUp;
+        private readonly KeyboardFocusChangedEventHandler _focusLost;
         public ButtonBase? Button { get; private set; }
 
         public OwnerMotion(FrameworkElement surface)
@@ -135,6 +128,14 @@ public static class InteractionMotion
             _press = (_, _) => Press(_surface);
             _release = (_, _) => Release(_surface);
             _captureLost = (_, _) => Release(_surface);
+            _keyDown = (_, args) =>
+            {
+                if (args.Key == Key.Space && !args.IsRepeat
+                    && (Keyboard.Modifiers & (ModifierKeys.Alt | ModifierKeys.Control)) == 0)
+                    Press(_surface);
+            };
+            _keyUp = (_, args) => { if (args.Key == Key.Space) Release(_surface); };
+            _focusLost = (_, _) => Release(_surface);
         }
 
         public void Attach()
@@ -153,6 +154,9 @@ public static class InteractionMotion
             Button.AddHandler(UIElement.PreviewMouseLeftButtonDownEvent, _press, true);
             Button.AddHandler(UIElement.PreviewMouseLeftButtonUpEvent, _release, true);
             Button.AddHandler(UIElement.LostMouseCaptureEvent, _captureLost, true);
+            Button.AddHandler(Keyboard.PreviewKeyDownEvent, _keyDown, true);
+            Button.AddHandler(Keyboard.PreviewKeyUpEvent, _keyUp, true);
+            Button.AddHandler(Keyboard.LostKeyboardFocusEvent, _focusLost, true);
         }
 
         public void Detach()
@@ -161,6 +165,9 @@ public static class InteractionMotion
             Button.RemoveHandler(UIElement.PreviewMouseLeftButtonDownEvent, _press);
             Button.RemoveHandler(UIElement.PreviewMouseLeftButtonUpEvent, _release);
             Button.RemoveHandler(UIElement.LostMouseCaptureEvent, _captureLost);
+            Button.RemoveHandler(Keyboard.PreviewKeyDownEvent, _keyDown);
+            Button.RemoveHandler(Keyboard.PreviewKeyUpEvent, _keyUp);
+            Button.RemoveHandler(Keyboard.LostKeyboardFocusEvent, _focusLost);
             Button = null;
         }
     }
@@ -168,8 +175,27 @@ public static class InteractionMotion
     private static void Animate(FrameworkElement element, double target, int duration)
     {
         if (element.RenderTransform is not ScaleTransform scale) return;
+        var fromX = scale.ScaleX;
+        var fromY = scale.ScaleY;
+        if (!scale.HasAnimatedProperties && Math.Abs(fromX - target) < 0.000001
+            && Math.Abs(fromY - target) < 0.000001) return;
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(scale.ScaleX, target, TimeSpan.FromMilliseconds(duration)) { EasingFunction = ease });
-        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(scale.ScaleY, target, TimeSpan.FromMilliseconds(duration)) { EasingFunction = ease });
+        var clockX = new DoubleAnimation(fromX, target, TimeSpan.FromMilliseconds(duration))
+            { EasingFunction = ease }.CreateClock();
+        var clockY = new DoubleAnimation(fromY, target, TimeSpan.FromMilliseconds(duration))
+            { EasingFunction = ease }.CreateClock();
+        element.SetValue(AnimationClockProperty, clockX);
+        clockX.Completed += (_, _) =>
+        {
+            // An interrupted clock must never clear its replacement. Once this
+            // transition settles, release both clocks instead of holding them.
+            if (!ReferenceEquals(element.GetValue(AnimationClockProperty), clockX)) return;
+            scale.ScaleX = scale.ScaleY = target;
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+            element.ClearValue(AnimationClockProperty);
+        };
+        scale.ApplyAnimationClock(ScaleTransform.ScaleXProperty, clockX);
+        scale.ApplyAnimationClock(ScaleTransform.ScaleYProperty, clockY);
     }
 }

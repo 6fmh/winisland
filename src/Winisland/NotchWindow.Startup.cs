@@ -1,6 +1,7 @@
 using System;
 using System.Windows.Threading;
 using Winisland.Controls;
+using Winisland.Services;
 
 namespace Winisland;
 
@@ -8,6 +9,8 @@ public partial class NotchWindow
 {
     private OrganizerPanel? _organizer;
     private ControlCenterPanel? _controlCenter;
+    private OrganizerStore? _organizerStore;
+    private ReminderScheduler? _reminders;
     private bool _runtimeStarted, _closed, _pollingSuppressedForTest;
     internal bool DeferredPanelsCreatedForTest => _organizer is not null || _controlCenter is not null;
     private OrganizerPanel Organizer
@@ -15,7 +18,8 @@ public partial class NotchWindow
         get
         {
             if (_organizer is not null) return _organizer;
-            _organizer = new OrganizerPanel { Name = "Organizer" };
+            EnsureReminders();
+            _organizer = new OrganizerPanel(_organizerStore!, _reminders) { Name = "Organizer" };
             _organizer.Notification += OnOrganizerNotification;
             _organizer.EditingChanged += OnOrganizerEditingChanged;
             OrganizerHost.Content = _organizer; RegisterName("Organizer", _organizer);
@@ -44,9 +48,15 @@ public partial class NotchWindow
             _runtimeStarted = true;
             _playerVolume.Start(); StartAppleDevices(); _pulse.Start(); _playerPoll.Start();
         }, DispatcherPriority.Background);
-        // Reminders must run even if Tools is never opened. Build their panel
-        // after first paint; Control Center is created only when selected.
-        Dispatcher.BeginInvoke(() => { if (!_closed) _ = Organizer; }, DispatcherPriority.ApplicationIdle);
+        // Load only reminder data while idle; both secondary panels stay lazy.
+        Dispatcher.BeginInvoke(() => { if (!_closed) EnsureReminders(); }, DispatcherPriority.ApplicationIdle);
+    }
+    private void EnsureReminders()
+    {
+        if (_reminders is not null) return;
+        _organizerStore = new OrganizerStore();
+        _reminders = new ReminderScheduler(Dispatcher, _organizerStore);
+        _reminders.Notification += OnOrganizerNotification;
     }
     internal void InitializeDeferredPanelsForTest() { _ = Organizer; _ = ControlCenter; }
 }

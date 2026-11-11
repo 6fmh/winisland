@@ -11,9 +11,20 @@
   <BooleanToVisibilityConverter x:Key="BoolVisibility"/>
   <SolidColorBrush x:Key="Accent" Color="#B9EDAA"/>
   <SolidColorBrush x:Key="Muted" Color="#929295"/>
+  <SolidColorBrush x:Key="KeyboardFocusAccent" Color="#0091FF"/>
+  <Style x:Key="UiControl" TargetType="Control">
+   <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
+   <Setter Property="FontSize" Value="13"/>
+   <Setter Property="FontWeight" Value="Normal"/>
+   <Setter Property="TextOptions.TextRenderingMode" Value="Grayscale"/>
+  </Style>
+  <Style TargetType="TextBox" BasedOn="{StaticResource UiControl}"/>
+  <Style TargetType="ComboBox" BasedOn="{StaticResource UiControl}"/>
+  <Style TargetType="CheckBox" BasedOn="{StaticResource UiControl}"/>
   <Style TargetType="TextBlock">
    <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
    <Setter Property="FontSize" Value="13"/>
+   <Setter Property="TextOptions.TextRenderingMode" Value="Grayscale"/>
   </Style>
   <Style x:Key="Glyph" TargetType="TextBlock">
    <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
@@ -22,7 +33,10 @@
    <Setter Property="HorizontalAlignment" Value="Center"/>
    <Setter Property="VerticalAlignment" Value="Center"/>
   </Style>
-  <Style x:Key="IslandButton" TargetType="Button">
+  <Style x:Key="IslandButton" TargetType="Button" BasedOn="{StaticResource UiControl}">
+   <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
+   <Setter Property="FontSize" Value="13"/>
+   <Setter Property="TextOptions.TextRenderingMode" Value="Grayscale"/>
    <Setter Property="Foreground" Value="#E9E9EC"/>
    <Setter Property="Background" Value="#1D1D1F"/>
    <Setter Property="BorderThickness" Value="0"/>
@@ -31,13 +45,13 @@
    <Setter Property="Cursor" Value="Hand"/>
    <Setter Property="Template">
     <Setter.Value><ControlTemplate TargetType="Button">
-     <Border x:Name="Surface" Background="{TemplateBinding Background}" CornerRadius="10" Padding="{TemplateBinding Padding}" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}">
+     <Border x:Name="Surface" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="1" CornerRadius="10" Padding="{TemplateBinding Padding}" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}">
       <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
      </Border>
      <ControlTemplate.Triggers>
       <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="#333336"/></Trigger>
       <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.65"/></Trigger>
-      <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="{StaticResource Accent}"/><Setter TargetName="Surface" Property="BorderThickness" Value="1"/></Trigger>
+      <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="{StaticResource KeyboardFocusAccent}"/></Trigger>
       <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Surface" Property="Opacity" Value="0.35"/></Trigger>
      </ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value>
@@ -51,11 +65,12 @@
    <Setter Property="Background" Value="{StaticResource Accent}"/>
    <Setter Property="Foreground" Value="#15211A"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-    <Border x:Name="Surface" Background="{TemplateBinding Background}" CornerRadius="10" Padding="{TemplateBinding Padding}" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+    <Border x:Name="Surface" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="1" CornerRadius="10" Padding="{TemplateBinding Padding}" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
     <ControlTemplate.Triggers>
      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.85"/></Trigger>
      <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.65"/></Trigger>
-     <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="White"/><Setter TargetName="Surface" Property="BorderThickness" Value="1"/></Trigger>
+     <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="{StaticResource KeyboardFocusAccent}"/></Trigger>
+     <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Surface" Property="Opacity" Value="0.35"/></Trigger>
     </ControlTemplate.Triggers>
    </ControlTemplate></Setter.Value></Setter>
   </Style>

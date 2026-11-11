@@ -1,0 +1,66 @@
+# Notification design and Windows capture research
+
+Reviewed 11 November 2026. References were fetched with background HTTP; no browser, normal app, notification balloon or personal desktop was opened.
+
+## Apple behavior and the requested notch placement
+
+Apple's [macOS notification guide](https://support.apple.com/guide/mac-help/view-app-notifications-mh40609/mac) says that notifications appear briefly in the **top-right corner of the desktop**, or remain there until closed. Moving the pointer over a notification exposes relevant actions, details and dismissal. Stacks can be expanded and collapsed. The [MacBook camera-area guide](https://support.apple.com/en-us/102125) describes physical camera housing and app safe-area behavior; it does not define a notification interface within the notch.
+
+The requested Winisland feature therefore applies macOS notification conventions to a software notch. Apple's physical notch and native notification placement should not be described as expanding to receive these notifications.
+
+Apple's current [Notifications HIG](https://developer.apple.com/design/human-interface-guidelines/notifications.md) supports:
+
+- Information that people can understand at a glance, with a short prominent title and succinct body.
+- A large app icon at the leading edge; communication notifications can instead show a contact avatar with a small app badge.
+- Contextual actions when useful. Clicking the notification normally opens its related content, so a separate redundant Open button is discouraged.
+- Graceful foreground handling and avoiding repeated notifications for the same event.
+- Legible hidden-preview content and respecting a person's notification preferences.
+
+The [Managing Notifications HIG](https://developer.apple.com/design/human-interface-guidelines/managing-notifications.md) explains Focus and delivery preferences. A software mirror should honor the source system's decision to show or suppress an alert, rather than independently replaying stored notifications or making sound again.
+
+## Visual references inspected
+
+| Reference | Observed details |
+| --- | --- |
+| [Apple's macOS 15 notification guide](https://support.apple.com/guide/mac-help/view-app-notifications-mh40609/15.0/mac/15.0), including its [official screenshot](https://help.apple.com/assets/67D1B1065D0706C4AD080C54/67D1B10E5D0706C4AD080C79/en_US/91ac1d1b0b5ace34bfdc52cd6a2a8865.png) | Leading app icon, strong title, body below, quieter urgency/time labels, rounded material cards, and hover dismissal/actions. The pictured native cards float in the upper-right desktop rather than joining the camera housing. |
+| [DynamicLake's official Notifications page](https://www.dynamiclake.com/notifications), including its [notification screenshot](https://framerusercontent.com/images/8ZWmstmYvSetZMWcYJEQ2icCwc.png) | A black top-connected software notch with rounded lower corners; a leading contact avatar and app badge; white semibold sender, gray two-line message and subdued trailing “now.” Text sits below the camera region. The reply row belongs to DynamicLake's messaging integrations. |
+| [Current Winisland design specification](NOTCH-DESIGN.md) | Existing fitted black camera silhouette, inward shoulders, separate expansion contour, bundled distributable Inter family, native-scale content, and reduced-motion support. |
+
+These images were downloaded and visually inspected under ignored `artifacts/notifications/research/`. They are evidence, not artwork to redistribute in Winisland. No Apple or DynamicLake assets or contact images were added to the app.
+
+The practical layout follows that hierarchy within Winisland's existing black notch: leading app icon, small source label, strong title and a maximum two-line body, with a quiet dismissal control. Preserve the camera area's black clearance. Keep text at native scale during expansion; fade/translate content gently and respect reduced motion. Exact notification width, font metrics and timeout are application tuning choices: Apple publishes no universal notch-notification dimensions or timing. SF Pro is not bundled because its downloadable license excludes embedding it in this Windows application; Inter remains the independently licensed approximation documented in the [font provenance](../src/Winisland/Assets/Fonts/README.md).
+
+## Windows implementation constraints
+
+Microsoft's [notification listener guide](https://learn.microsoft.com/en-us/windows/apps/design/shell/tiles-and-notifications/notification-listener) requires the **User Notification Listener capability in `Package.appxmanifest`** and explicit permission through [`RequestAccessAsync`](https://learn.microsoft.com/en-us/uwp/api/windows.ui.notifications.management.usernotificationlistener.requestaccessasync). The [API reference](https://learn.microsoft.com/en-us/uwp/api/windows.ui.notifications.management.usernotificationlistener) requires that permission request on a UI thread. A denied request stays denied until changed in Windows Settings. The API supports app toasts and exposes current notifications, app metadata, change events and removal.
+
+Winisland's existing installer/portable native WPF EXE is unpackaged. Its ordinary `app.manifest` is not a package capability declaration. Merely compiling calls to `UserNotificationListener` does not establish that incoming notifications can be read by the shipped application, and reading current notifications would require deliberate history/replay handling.
+
+An unpackaged-compatible approach can observe **visible Windows shell notification banners** using native accessibility events, then read their UI Automation text. That mirrors banners Windows actually presents, keeps Windows responsible for sound and Do Not Disturb, and does not require opening Notification Center. This is a compatibility approach, not a documented notification-subscription API:
+
+- Shell process/window metadata and actual toast identifiers must distinguish banners from Start, Quick Settings, Notification Center and other flyouts. A `Toast` descendant alone does not prove that a root is an incoming banner; Notification Center also contains toast cards.
+- Only visible banner content should be read. Existing notification history must not be replayed when a flyout opens or monitoring starts.
+- Accessibility events can repeat without a meaningful state change. Deduplicate an individual visible presentation while permitting a later genuinely repeated notification.
+- Shell versions and third-party toast layouts can change. Real shell compatibility requires evidence beyond synthetic identifiers in fixtures.
+- Notification content should stay in memory and never be written to diagnostic logs. App icons should come from app metadata or registered icons, with an original generic symbol only as a fallback.
+- Dismissal should clearly mean the notch presentation unless actual source dismissal is implemented. Source activation should only be offered when it can be performed reliably; do not invent notification actions or quick replies.
+
+Read-only inspection of the machine's deployed `Windows.UI.ActionCenter.dll` version **10.0.26100.9818**, SHA-256 `62F089F7338821D8B7958A2849E2E5F63F186325FF124B9EC1EEAC1979952E1D`, found distinct `ActionCenter.ToastCenterPage` and `ActionCenter.NotificationCenterPage` classes and separate embedded `ToastCenter/` and `NotificationCenter/` XAML paths. Toast classes include `ActionCenter.ToastView`, `ActionCenter.ToastContentView`, `ActionCenter.FlexibleToastView` and explicit automation peers. `AppName` and `Windows.UI.Core.CoreWindow` are present; `ShellExperienceHost.exe` likewise contains separate ToastCenter and NotificationCenter namespaces. Exact binary/hash/string evidence is saved in ignored `artifacts/notifications/capture/shell-resource-evidence.json`. The inspection read PE bytes without loading the DLL, launching a process or inspecting the user's UI. It supports these classifier names on this deployed version; it does **not** establish actual emitted UI Automation text IDs, live toast delivery or compatibility with every Windows release.
+
+Microsoft's [UI Automation event overview](https://learn.microsoft.com/en-us/dotnet/framework/ui-automation/ui-automation-events-overview) explicitly notes that some events can fire even when UI state has not changed. Its [threading guidance](https://learn.microsoft.com/en-us/dotnet/framework/ui-automation/ui-automation-threading-issues) recommends performing desktop UI Automation calls on a separate thread to avoid conflicts with the application's own UI; event subscriptions and removal should use that same non-UI thread. The [native event overview](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-eventsoverview) explains provider-raised events, including `UiaRaiseNotificationEvent`; those events should not be confused with a guaranteed cross-app toast listener.
+
+### Read-only app artwork
+
+The independent icon resolver first matches installed Start-menu shortcut names and reads their artwork through [`SHGetFileInfo`](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shgetfileinfow). Microsoft requires a background thread, COM initialization and releasing the returned owned `HICON` with `DestroyIcon`; no shortcut is executed. The fallback queries only the current user's packages using [`PackageManager.FindPackagesForUser`](https://learn.microsoft.com/en-us/uwp/api/windows.management.deployment.packagemanager.findpackagesforuser), whose empty SID means the current user, then reads matching [`GetAppListEntriesAsync`](https://learn.microsoft.com/en-us/uwp/api/windows.applicationmodel.package.getapplistentriesasync) and [`AppDisplayInfo.GetLogo`](https://learn.microsoft.com/en-us/uwp/api/windows.applicationmodel.appdisplayinfo.getlogo) metadata. These APIs do not read notification history or require the notification-listener capability. Index/cache limits and metadata deadlines keep repeated lookups bounded; images are decoded at banner size and frozen before crossing to WPF's dispatcher. Missing artwork retains an original generic icon.
+
+## Research access and verification limits
+
+The required Google Custom Search query was attempted through the search MCP and returned **HTTP 403: the configured project lacks Custom Search JSON API access**. Direct background requests reached regional consent and JavaScript access pages. A final headless Chromium search used an isolated automation profile and rejected optional cookies; Google returned an unusual-traffic challenge. The browser closed without using any personal profile or interactive window. No indexed Google results were available, and no search ranking or Google-derived evidence is claimed. Official Apple/Microsoft references and DynamicLake's product page were read directly instead, following the project's unavailable-MCP fallback guidance.
+
+Private-desktop tests should verify native capture plumbing, text parsing, explicit history/flyout exclusion, repeated-event handling, missing metadata, display layout, queuing, dismissal, hover timing, fullscreen suppression, settings and reduced motion. An injected private HWND fixture exercises hooks and UI Automation without affecting the user's desktop, but does not by itself establish that a specific Windows shell build exposes the same identifiers. Keep that distinction explicit in verification reports and completion claims.
+
+## Implemented behavior and verification
+
+Visible Windows shell banners are mirrored to a black, top-connected notch presentation with real application artwork where available, a source label, prominent title and a bounded two-line preview. Winisland's own messages use its bundled application icon. Six-second dismissal pauses on hover; a small transient queue handles bursts. The open notch keeps its controls usable above the notification footer. Dismissal clears the notch presentation; optional source activation is available only when the live toast exposes an InvokePattern, and rechecks its content before invoking. Windows continues to control its own banners, sounds, privacy and Do Not Disturb. Settings → Activities → Notifications on the notch disables capture and clears queued content.
+
+The final normal `scripts/Build.ps1 -Verify` gate ran from an immutable current-source snapshot on a private Windows desktop and passed **824 recorded results**. Local evidence is retained in `artifacts/design-polish/run6-source/artifacts/verification/results.json`, its notification PNGs and the source SHA-256 manifest. Notification checks cover real native HWND events → UI Automation → the actual notch; current deployed toast classes; history/offscreen rejection; a 2400×1400 transparent host with a small visible toast; duplicate events; stopping/restarting capture; real app-icon lookup/render/cache limits; long text; burst limits; the actual hover/six-second timer; fullscreen suppression; expanded footer bounds; dismissal; reduced motion and released opacity clocks; explicit supported activation; reused-HWND stale-action rejection; and disposal. All current application source/assets matched the tested snapshot byte for byte at completion. No real Windows toast was generated on the user's desktop and the user's running instance was not restarted.

@@ -14,8 +14,51 @@ namespace Winisland;
 
 internal static class PlaybackVerification
 {
+    private static void VerifyArtworkDecoding(Action<bool, string> check)
+    {
+        foreach (var (width, height) in new[] { (320, 160), (160, 320), (1, 10000), (32, 24) })
+        {
+            var cover = ArtworkDecoder.Decode(EncodeCover(width, height));
+            var expectedScale = Math.Min(1, ArtworkDecoder.MaximumEdge / (double)Math.Max(width, height));
+            check(cover.PixelWidth <= ArtworkDecoder.MaximumEdge && cover.PixelHeight <= ArtworkDecoder.MaximumEdge
+                && Math.Abs(cover.PixelWidth - width * expectedScale) <= 1
+                && Math.Abs(cover.PixelHeight - height * expectedScale) <= 1,
+                $"Artwork {width}x{height} preserves its aspect ratio within a160px edge without upscaling");
+            check(cover.IsFrozen, "Decoded artwork owns frozen pixels for safe sharing across UI and worker threads");
+        }
+        var (detached, encoded) = DecodeCollectibleCover();
+        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+        var pixels = new byte[detached.PixelWidth * detached.PixelHeight * 4];
+        detached.CopyPixels(pixels, detached.PixelWidth * 4, 0);
+        check(!encoded.IsAlive && pixels[2] == 120 && pixels[3] == 255,
+            "Keeping a decoded cover releases its megabyte encoded buffer while pixels remain readable");
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static (System.Windows.Media.Imaging.BitmapSource Cover, WeakReference Encoded) DecodeCollectibleCover()
+    {
+        var png = EncodeCover(320, 160);
+        var encoded = new byte[1024 * 1024];
+        png.CopyTo(encoded, 0);
+        return (ArtworkDecoder.Decode(encoded), new WeakReference(encoded));
+    }
+
+    private static byte[] EncodeCover(int width, int height)
+    {
+        var pixels = new byte[width * height * 4];
+        for (var i = 0; i < pixels.Length; i += 4) { pixels[i + 2] = 120; pixels[i + 3] = 255; }
+        var source = System.Windows.Media.Imaging.BitmapSource.Create(width, height, 96, 96,
+            System.Windows.Media.PixelFormats.Bgra32, null, pixels, width * 4);
+        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(source));
+        using var stream = new System.IO.MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
     internal static async Task RunAsync(NotchWindow notch, MediaService media, SettingsStore settings, Action<bool, string> assert, Action<string> capture)
     {
+        VerifyArtworkDecoding(assert);
         var savedSettings = settings.Current;
         var commands = new List<double>();
         var pointer = new Point();

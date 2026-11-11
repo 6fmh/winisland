@@ -1,0 +1,28 @@
+<UserControl x:Class="Winisland.Controls.NotificationBanner"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:controls="clr-namespace:Winisland.Controls"
+ AutomationProperties.LiveSetting="Polite" Focusable="False">
+ <Grid Background="Transparent">
+  <Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition Width="14"/><ColumnDefinition/><ColumnDefinition Width="30"/></Grid.ColumnDefinitions>
+  <Border Width="40" Height="40" CornerRadius="10" Background="#252527" VerticalAlignment="Center">
+   <Grid>
+    <controls:NotchIcon x:Name="FallbackIcon" Kind="Bell" Width="22" Height="22" Foreground="#D1D1D6" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    <Image x:Name="AppIcon" Stretch="Uniform" Margin="3"/>
+   </Grid>
+  </Border>
+  <Button x:Name="OpenButton" Grid.Column="2" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center"
+   Background="Transparent" BorderThickness="0" Padding="0" Cursor="Arrow" Click="OnOpen" Focusable="False">
+   <Button.Template><ControlTemplate TargetType="Button"><ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/></ControlTemplate></Button.Template>
+   <StackPanel Margin="0,0,12,0">
+    <TextBlock x:Name="SourceLabel" FontSize="11" Foreground="#98989D" TextTrimming="CharacterEllipsis" Margin="0,0,0,4"/>
+    <TextBlock x:Name="TitleLabel" FontSize="14" FontWeight="SemiBold" Foreground="#F5F5F7" TextTrimming="CharacterEllipsis"/>
+    <TextBlock x:Name="BodyLabel" FontSize="12" LineHeight="17" Foreground="#C7C7CC" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="34" Margin="0,4,0,0"/>
+   </StackPanel>
+  </Button>
+  <Button x:Name="DismissButton" Grid.Column="3" Width="26" Height="26" VerticalAlignment="Top" Margin="0,2,0,0"
+   Style="{DynamicResource NotchIconButton}" Click="OnDismiss" ToolTip="Dismiss notification" AutomationProperties.Name="Dismiss notification">
+   <controls:NotchIcon Kind="Close" Width="12" Height="12" Foreground="#98989D"/>
+  </Button>
+ </Grid>
+</UserControl>

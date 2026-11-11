@@ -23,6 +23,8 @@ public sealed class BrowserVolumeBridge : IPlayerVolumeBackend, IPlayerVolumeNot
     private readonly Task _listener;
     private bool _disposed;
     private static readonly Regex SafeId = new(@"\A[A-Za-z0-9:_-]{1,96}\z", RegexOptions.CultureInvariant);
+    private static readonly (string Source, string Browser)[] BrowserSources =
+        { ("comet", "comet"), ("perplexity", "comet"), ("chrome", "chrome"), ("msedge", "edge"), ("brave", "brave"), ("vivaldi", "vivaldi"), ("opera", "opera") };
     public static string PipeName
     {
         get
@@ -44,9 +46,10 @@ public sealed class BrowserVolumeBridge : IPlayerVolumeBackend, IPlayerVolumeNot
     internal static string BrowserNameForSource(string source)
     {
         var value = source.Trim();
-        foreach (var entry in new[] { ("comet", "comet"), ("perplexity", "comet"), ("chrome", "chrome"), ("msedge", "edge"), ("brave", "brave"), ("vivaldi", "vivaldi"), ("opera", "opera") })
-            if (value.Equals(entry.Item1, StringComparison.OrdinalIgnoreCase) || value.Equals(entry.Item1 + ".exe", StringComparison.OrdinalIgnoreCase)
-                || value.StartsWith(entry.Item1 + ".", StringComparison.OrdinalIgnoreCase)) return entry.Item2;
+        foreach (var entry in BrowserSources)
+            if (value.Equals(entry.Source, StringComparison.OrdinalIgnoreCase)
+                || value.Length > entry.Source.Length && value[entry.Source.Length] == '.'
+                    && value.StartsWith(entry.Source, StringComparison.OrdinalIgnoreCase)) return entry.Browser;
         if (value.StartsWith("Microsoft.MicrosoftEdge_", StringComparison.OrdinalIgnoreCase)) return "edge";
         return "";
     }
@@ -57,30 +60,38 @@ public sealed class BrowserVolumeBridge : IPlayerVolumeBackend, IPlayerVolumeNot
         var browserName = BrowserNameForSource(media.Source);
         var missing = new PlayerVolumeSnapshot { Source = media.Source, Player = BrowserDisplayName(browserName),
             ConnectionHint = IsConnected ? "The browser has not reported this media player yet." : "Connect the browser companion to control this player's volume." };
-        if (!Supports(media) || _disposed) return Task.FromResult(missing);
+        if (!media.HasSession || browserName.Length == 0 || _disposed) return Task.FromResult(missing);
         lock (_gate)
         {
             Prune();
             // Comet can publish Chromium's generic Chrome SMTC identifier.
-            var candidates = _players.Values.Where(p => p.Client.Browser == browserName || browserName == "chrome" && p.Client.Browser == "comet").ToArray();
             var title = NormalizeTitle(media.Title);
-            var matching = candidates.Where(p => NormalizeTitle(p.Title) == title && title.Length > 0).ToArray();
-            BrowserPlayer? player = null;
-            if (matching.Length == 1) player = matching[0];
-            else if (matching.Length > 1)
+            var artist = NormalizeTitle(media.Artist);
+            var candidateCount = 0; var matchingCount = 0; var artistCount = 0;
+            var playingCount = 0; var artistPlayingCount = 0;
+            BrowserPlayer? candidate = null, matching = null, byArtist = null, playing = null, artistPlaying = null;
+            foreach (var entry in _players.Values)
             {
-                var artist = NormalizeTitle(media.Artist);
-                var byArtist = matching.Where(p => artist.Length > 0 && NormalizeTitle(p.Artist) == artist).ToArray();
-                if (byArtist.Length == 1) player = byArtist[0];
-                else
-                {
-                    var playing = (byArtist.Length > 0 ? byArtist : matching).Where(p => p.Playing == media.IsPlaying).ToArray();
-                    if (playing.Length == 1) player = playing[0];
-                }
+                if (entry.Client.Browser != browserName && !(browserName == "chrome" && entry.Client.Browser == "comet")) continue;
+                candidate = entry; candidateCount++;
+                if (title.Length == 0 || entry.Title != title) continue;
+                matching = entry; matchingCount++;
+                if (entry.Playing == media.IsPlaying) { playing = entry; playingCount++; }
+                if (artist.Length == 0 || entry.Artist != artist) continue;
+                byArtist = entry; artistCount++;
+                if (entry.Playing == media.IsPlaying) { artistPlaying = entry; artistPlayingCount++; }
+            }
+            BrowserPlayer? player = null;
+            if (matchingCount == 1) player = matching;
+            else if (matchingCount > 1)
+            {
+                if (artistCount == 1) player = byArtist;
+                else if (artistCount > 0 && artistPlayingCount == 1) player = artistPlaying;
+                else if (artistCount == 0 && playingCount == 1) player = playing;
             }
             // Unknown metadata is usable only when exactly one player exists.
             // A known mismatched title never controls an arbitrary active tab.
-            else if (candidates.Length == 1 && title is "" or "untitled media" or "not playing") player = candidates[0];
+            else if (candidateCount == 1 && title is "" or "untitled media" or "not playing") player = candidate;
             if (player is null) return Task.FromResult(missing);
             return Task.FromResult(new PlayerVolumeSnapshot { Available = true, Source = media.Source, Player = BrowserDisplayName(player.Client.Browser),
                 TargetId = player.Key, Volume = player.Volume, Muted = player.Muted, ConnectionHint = "Website player volume" });
@@ -169,7 +180,8 @@ public sealed class BrowserVolumeBridge : IPlayerVolumeBackend, IPlayerVolumeNot
             lock (_gate)
             {
                 _clients.Remove(client.Key);
-                foreach (var key in _players.Where(p => p.Value.Client == client).Select(p => p.Key).ToArray()) _players.Remove(key);
+                foreach (var entry in _players)
+                    if (entry.Value.Client == client) _players.Remove(entry.Key);
             }
             foreach (var pending in client.Pending.Values) pending.Completion.TrySetResult(false);
             client.Dispose();
@@ -186,7 +198,9 @@ public sealed class BrowserVolumeBridge : IPlayerVolumeBackend, IPlayerVolumeNot
         {
             Prune();
             if (!_players.ContainsKey(key) && (_players.Count >= 128 || _players.Values.Count(p => p.Client == client) >= 64)) return;
-            _players[key] = new BrowserPlayer(key, id, client, GetText(root, "title", 512), GetText(root, "artist", 256), volume,
+            // Normalize once when metadata arrives rather than for every
+            // candidate on every active volume refresh. Keep only this form.
+            _players[key] = new BrowserPlayer(key, id, client, NormalizeTitle(GetText(root, "title", 512)), NormalizeTitle(GetText(root, "artist", 256)), volume,
                 GetBool(root, "muted"), GetBool(root, "playing"), Environment.TickCount64);
         }
         Changed?.Invoke(this, EventArgs.Empty);
@@ -216,7 +230,9 @@ public sealed class BrowserVolumeBridge : IPlayerVolumeBackend, IPlayerVolumeNot
     private void Prune()
     {
         var now = Environment.TickCount64;
-        foreach (var key in _players.Where(p => now - p.Value.Seen > 30000).Select(p => p.Key).ToArray()) _players.Remove(key);
+        // Dictionary removal preserves enumeration validity on .NET 8.
+        foreach (var entry in _players)
+            if (now - entry.Value.Seen > 30000) _players.Remove(entry.Key);
     }
     private static bool TryVolume(JsonElement root, out double volume)
     {

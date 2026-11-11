@@ -129,11 +129,7 @@ public sealed class MediaService : IDisposable
                         if (artworkHash == _artworkHash && Current.Artwork is not null) artwork = Current.Artwork;
                         else
                         {
-                            using var memory = new MemoryStream(bytes);
-                            var bitmap = new BitmapImage();
-                            bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                            bitmap.DecodePixelWidth = 160; bitmap.StreamSource = memory; bitmap.EndInit(); bitmap.Freeze();
-                            artwork = bitmap;
+                            artwork = ArtworkDecoder.Decode(bytes);
                         }
                     }
                 }

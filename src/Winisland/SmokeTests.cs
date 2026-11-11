@@ -24,6 +24,10 @@ internal static class SmokeTests
     [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr handle, int index);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr handle, out NativeRect rect);
     [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(NativePoint point);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr handle);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr handle);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr handle, int command);
     [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
 
@@ -153,10 +157,47 @@ internal static class SmokeTests
                 (condition, name) => Assert(condition, name, results));
             await ControlCenterVerification.RunAsync(notch, store, output,
                 (condition, name) => Assert(condition, name, results));
+            await NotificationVerification.RunAsync(notch, store, output, (condition, name) => Assert(condition, name, results));
+            await NotificationCaptureVerification.RunAsync((condition, name) => Assert(condition, name, results), notch.ShowNotification);
+            Assert(notch.ActiveNotificationForTest?.AppName == "Messages", "Native accessibility capture delivers to the actual notch presentation", results);
+            notch.DismissNotificationForTest(true);
             await AppleDeviceVerification.RunAsync(notch, store, output,
                 (condition, name) => Assert(condition, name, results));
 
             var island = (FrameworkElement)notch.FindName("Island");
+            Phase("Idle overlay recovery");
+            var foregroundBeforeRecovery = GetForegroundWindow();
+            ShowWindow(handle, 6); // Minimize only the fixture HWND on the private desktop.
+            NativeMethods.SetWindowPos(handle, new IntPtr(-2), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+            Assert(IsIconic(handle) && (GetWindowLong(handle, -20) & 0x0008) == 0,
+                "Idle recovery fixture is minimized and has lost native topmost state", results);
+            notch.StartOverlayPulseForTest();
+            try
+            {
+                await WaitUntil(() => !IsIconic(handle) && IsWindowVisible(handle) && (GetWindowLong(handle, -20) & 0x0008) != 0, 2600);
+                Assert(!IsIconic(handle) && IsWindowVisible(handle) && (GetWindowLong(handle, -20) & 0x0008) != 0,
+                    "The real idle pulse restores a minimized displaced notch without user input", results);
+                Assert(GetForegroundWindow() == foregroundBeforeRecovery,
+                    "Idle overlay recovery preserves the foreground window", results);
+                await Task.Delay(2200);
+                var idleFrame = Capture(notch, Path.Combine(output, "notch-idle-recovered.png"));
+                Assert(island.Visibility == Visibility.Visible && island.Opacity == 1
+                    && GetAlpha(idleFrame, (int)(notch.ActualWidth / 2), 15) == 255,
+                    "Idle maintenance leaves the camera housing opaque and visible across repeated pulses", results);
+            }
+            finally { notch.StopPollingForTest(); }
+
+            notch.Hide();
+            Assert(!notch.IsVisible, "Resume recovery fixture starts with a hidden notch", results);
+            NativeMethods.SetWindowPos(handle, new IntPtr(-2), screen.Left + 80, screen.Top + 80, 0, 0, 0x0001 | 0x0010);
+            notch.RecoverOverlayForTest();
+            notch.RecoverOverlayForTest(); // Resume/display notifications can arrive together.
+            await WaitUntil(() => notch.IsVisible && (GetWindowLong(handle, -20) & 0x0008) != 0, 500);
+            GetWindowRect(handle, out var recoveredRect);
+            Assert(notch.IsVisible && recoveredRect.Top == screen.Top
+                && Math.Abs((recoveredRect.Left + recoveredRect.Right) / 2 - (screen.Left + screen.Right) / 2) <= 1
+                && GetForegroundWindow() == foregroundBeforeRecovery,
+                "Coalesced resume recovery shows and recenters the notch without stealing focus", results);
             Assert(NativeMethods.IsShellProcess("TextInputHost") && NativeMethods.IsShellProcess("InputApp")
                 && NativeMethods.IsShellProcess("shellhost"),
                 "Windows Quick Settings and input flyout hosts are excluded from fullscreen hiding regardless of process-name casing", results);
@@ -186,6 +227,15 @@ internal static class SmokeTests
                 results.Add(new { check = "Fullscreen entry response", milliseconds = fullscreenResponse.ElapsedMilliseconds });
                 Assert(NativeMethods.IsFullscreenWindowOn(fullscreenHandle, store.Current.MonitorDevice, handle),
                     "A foreground borderless fullscreen app still triggers fullscreen hiding", results);
+                notch.RecoverOverlayForTest();
+                notch.StartOverlayPulseForTest();
+                try
+                {
+                    await Task.Delay(2200);
+                    Assert(island.Visibility == Visibility.Hidden && island.Opacity == 0,
+                        "Resume recovery and repeated idle pulses preserve intentional fullscreen hiding", results);
+                }
+                finally { notch.StopPollingForTest(); }
 
                 fullscreenWindow.Hide();
                 await WaitUntil(() => island.Visibility == Visibility.Visible, 250);
@@ -414,6 +464,8 @@ internal static class SmokeTests
             settingsWindow = new SettingsWindow(store, playerVolume: playerVolume);
             settingsWindow.Show();
             await Settle(app);
+            await NotchVisualVerification.VerifySettingsAsync(settingsWindow, store, output,
+                (condition, name) => Assert(condition, name, results));
             Capture(settingsWindow, Path.Combine(output, "settings-general.png"));
             settingsWindow.SelectPage("appearance");
             await Settle(app);
@@ -481,21 +533,44 @@ internal static class SmokeTests
             await Task.Delay(200);
             // Handled owner events exercise the production motion subscription.
             Press(UIElement.PreviewMouseLeftButtonDownEvent);
-            await Task.Delay(100);
-            Assert(Math.Abs(scale.ScaleX - 0.94) < 0.01,
-                "A control-local button press compresses its icon capsule through its owner event", results);
+            await WaitUntil(() => Math.Abs(scale.ScaleX - 0.97) < 0.001 && !scale.HasAnimatedProperties, 1000);
+            Assert(Math.Abs(scale.ScaleX - 0.97) < 0.01 && !scale.HasAnimatedProperties,
+                "A control-local button press gives restrained feedback and releases its settled clocks", results);
             Press(UIElement.PreviewMouseLeftButtonUpEvent);
-            await Task.Delay(220);
-            Assert(Math.Abs(scale.ScaleX - 1) < 0.01,
+            await WaitUntil(() => scale.ScaleX == 1 && !scale.HasAnimatedProperties, 1000);
+            Assert(Math.Abs(scale.ScaleX - 1) < 0.01 && !scale.HasAnimatedProperties,
                 "A handled button release restores its capsule without leaving it pressed", results);
             EnterPointer(surface);
             await Task.Delay(180);
-            Assert(Math.Abs(scale.ScaleX - 1.025) < 0.01,
-                "A routed hover scales the released button capsule", results);
+            Assert(scale.ScaleX == 1 && scale.ScaleY == 1 && !scale.HasAnimatedProperties,
+                "Pointer hover keeps the released button and its label at native size without animation", results);
             LeavePointer(surface);
             await Task.Delay(180);
             Assert(Math.Abs(scale.ScaleX - 1) < 0.01,
                 "Leaving a released button returns its capsule to normal size", results);
+            PressKey(Keyboard.PreviewKeyDownEvent);
+            await WaitUntil(() => Math.Abs(scale.ScaleX - 0.97) < 0.001 && !scale.HasAnimatedProperties, 1000);
+            Assert(Math.Abs(scale.ScaleX - 0.97) < 0.01,
+                "Space gives keyboard users the same restrained press feedback as pointer input", results);
+            PressKey(Keyboard.PreviewKeyUpEvent);
+            await WaitUntil(() => scale.ScaleX == 1 && !scale.HasAnimatedProperties, 1000);
+            Assert(scale.ScaleX == 1 && scale.ScaleY == 1 && !scale.HasAnimatedProperties,
+                "Keyboard release restores native scale and clears both control clocks", results);
+            PressKey(Keyboard.PreviewKeyDownEvent);
+            await WaitUntil(() => Math.Abs(scale.ScaleX - 0.97) < 0.001 && !scale.HasAnimatedProperties, 1000);
+            button.RaiseEvent(new KeyboardFocusChangedEventArgs(Keyboard.PrimaryDevice,
+                Environment.TickCount, button, null)
+                { RoutedEvent = Keyboard.LostKeyboardFocusEvent, Handled = true });
+            await WaitUntil(() => scale.ScaleX == 1 && !scale.HasAnimatedProperties, 1000);
+            Assert(scale.ScaleX == 1 && !scale.HasAnimatedProperties,
+                "Leaving keyboard focus during a held press cannot leave a control compressed", results);
+            Press(UIElement.PreviewMouseLeftButtonDownEvent);
+            Press(UIElement.PreviewMouseLeftButtonUpEvent);
+            PressKey(Keyboard.PreviewKeyDownEvent);
+            PressKey(Keyboard.PreviewKeyUpEvent);
+            await WaitUntil(() => scale.ScaleX == 1 && !scale.HasAnimatedProperties, 1000);
+            Assert(scale.ScaleX == 1 && scale.ScaleY == 1 && !scale.HasAnimatedProperties,
+                "Rapid same-turn pointer and keyboard reversals settle at the latest released state", results);
             Press(UIElement.PreviewMouseLeftButtonDownEvent);
             await Task.Delay(100);
             store.Update(store.Current with { ReducedMotion = true });
@@ -510,6 +585,9 @@ internal static class SmokeTests
 
         void Press(RoutedEvent routedEvent) => button.RaiseEvent(new MouseButtonEventArgs(
             Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = routedEvent, Handled = true });
+        void PressKey(RoutedEvent routedEvent) => button.RaiseEvent(new KeyEventArgs(
+            Keyboard.PrimaryDevice, PresentationSource.FromVisual(button), Environment.TickCount, Key.Space)
+            { RoutedEvent = routedEvent, Handled = true });
     }
     private static async Task Settle(App app)
     {

@@ -77,13 +77,16 @@
   <Setter Property="Foreground" Value="{StaticResource Muted}"/><Setter Property="Cursor" Value="Hand"/>
   <Setter Property="FocusVisualStyle" Value="{StaticResource NotchFocus}"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
-   <Border x:Name="Surface" Background="Transparent" Height="26" VerticalAlignment="Center" CornerRadius="13" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}">
-    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-   </Border>
+   <Grid Background="Transparent">
+    <Border x:Name="Surface" Background="Transparent" Height="26" VerticalAlignment="Center" CornerRadius="13" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}">
+     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    </Border>
+   </Grid>
    <ControlTemplate.Triggers>
     <Trigger Property="IsChecked" Value="True"><Setter TargetName="Surface" Property="Background" Value="{StaticResource ControlSelectedFill}"/><Setter Property="Foreground" Value="White"/></Trigger>
     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="{StaticResource ControlHoverFill}"/><Setter Property="Foreground" Value="White"/></Trigger>
     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.65"/></Trigger>
+    <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Surface" Property="Opacity" Value="0.35"/></Trigger>
    </ControlTemplate.Triggers>
   </ControlTemplate></Setter.Value></Setter>
  </Style>

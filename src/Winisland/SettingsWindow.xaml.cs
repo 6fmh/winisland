@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using Winisland.Services;
@@ -19,6 +21,8 @@ public partial class SettingsWindow : Window
     private bool _loading = true;
     private bool _connectingSpotify;
     private bool _connectingSpotifyAccount;
+    private string _selectedPage = "general";
+    private readonly Dictionary<string, double> _pageOffsets = new();
     private readonly CancellationTokenSource _spotifySignIn = new();
     public event EventHandler? OpenNotchRequested;
     public event EventHandler? UpdatesRequested;
@@ -35,6 +39,7 @@ public partial class SettingsWindow : Window
         Height = Math.Min(740, SystemParameters.WorkArea.Height - 20);
         PreviewCard.SizeChanged += (_, _) => PreviewCard.Clip = new RectangleGeometry(new Rect(0, 0, PreviewCard.ActualWidth, PreviewCard.ActualHeight), 14, 14);
         Populate();
+        SelectPage("general");
         RefreshUploadConnection();
         RefreshPlayerConnection();
         SpotifyClientIdInput.Text = _playerVolume?.SpotifyAccount?.ClientId ?? "";
@@ -57,6 +62,7 @@ public partial class SettingsWindow : Window
         LiveToggle.IsChecked = current.ShowLiveActivity;
         MotionToggle.IsChecked = current.ReducedMotion;
         HudToggle.IsChecked = current.ShowVolumeHud;
+        NotificationsToggle.IsChecked = current.ShowNotifications;
         WidthSlider.Value = current.NotchWidth;
         HeightSlider.Value = current.NotchHeight;
         MonitorCombo.Items.Clear();
@@ -86,16 +92,17 @@ public partial class SettingsWindow : Window
                 ShowLiveActivity = LiveToggle.IsChecked == true,
                 ReducedMotion = MotionToggle.IsChecked == true,
                 ShowVolumeHud = HudToggle.IsChecked == true,
+                ShowNotifications = NotificationsToggle.IsChecked == true,
                 NotchWidth = WidthSlider.Value,
                 NotchHeight = HeightSlider.Value,
                 MonitorDevice = (MonitorCombo.SelectedItem as MonitorOption)?.Device ?? ""
             });
-            SaveStatus.Text = "✓  Changes saved automatically";
+            SetSaveStatus("Changes saved automatically");
         }
         catch (Exception ex)
         {
             Log.Error("Save settings", ex);
-            SaveStatus.Text = "Couldn't save changes. Please try again.";
+            SetSaveStatus("Couldn't save changes. Please try again.", error: true);
             Populate();
         }
     }
@@ -112,12 +119,21 @@ public partial class SettingsWindow : Window
     private void OnMonitorChanged(object sender, SelectionChangedEventArgs e) => Save();
     private void OnResetClick(object sender, RoutedEventArgs e)
     {
-        try { _settings.Update(new IslandSettings { HasLaunched = true, StartWithWindows = _settings.Current.StartWithWindows }); Populate(); }
-        catch (Exception ex) { Log.Error("Restore settings", ex); SaveStatus.Text = "Couldn't restore settings."; }
+        try { _settings.Update(new IslandSettings { HasLaunched = true, StartWithWindows = _settings.Current.StartWithWindows }); Populate(); SetSaveStatus("Defaults restored. Startup preference kept."); }
+        catch (Exception ex) { Log.Error("Restore settings", ex); SetSaveStatus("Couldn't restore settings. Please try again.", error: true); }
+    }
+    private void SetSaveStatus(string message, bool error = false)
+    {
+        SaveStatus.Text = message;
+        SaveStatus.Foreground = error ? new SolidColorBrush(Color.FromRgb(185, 45, 35)) : (Brush)FindResource("Secondary");
+        SaveStatus.ToolTip = message;
     }
     private void OnNavClick(object sender, RoutedEventArgs e) => SelectPage((string)((Button)sender).Tag);
     internal void SelectPage(string page)
     {
+        if (page is not ("general" or "appearance" or "activities" or "players" or "uploads" or "about")) return;
+        _pageOffsets[_selectedPage] = PageScroll.VerticalOffset;
+        _selectedPage = page;
         GeneralPanel.Visibility = page == "general" ? Visibility.Visible : Visibility.Collapsed;
         AppearancePanel.Visibility = page == "appearance" ? Visibility.Visible : Visibility.Collapsed;
         ActivitiesPanel.Visibility = page == "activities" ? Visibility.Visible : Visibility.Collapsed;
@@ -126,9 +142,11 @@ public partial class SettingsWindow : Window
         PlayersPanel.Visibility = page == "players" ? Visibility.Visible : Visibility.Collapsed;
         PreviewCard.Visibility = page is "general" or "appearance" ? Visibility.Visible : Visibility.Collapsed;
         foreach (var button in new[] { GeneralNav, AppearanceNav, ActivitiesNav, PlayersNav, UploadsNav, AboutNav })
-            button.Background = (string)button.Tag == page ? (Brush)FindResource("SelectedBackground") : Brushes.Transparent;
+            button.SetValue(Selector.IsSelectedProperty, (string)button.Tag == page);
         PageTitle.Text = page switch { "appearance" => "Appearance", "activities" => "Activities", "players" => "Player controls", "uploads" => "Uploads", "about" => "About Winisland", _ => "General" };
         if (page == "players") RefreshPlayerConnection();
+        PageScroll.UpdateLayout();
+        PageScroll.ScrollToVerticalOffset(_pageOffsets.GetValueOrDefault(page));
     }
     private void OnPlayerConnectionChanged(object? sender, EventArgs args) => RefreshPlayerConnection();
     private void RefreshPlayerConnection()

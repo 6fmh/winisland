@@ -115,6 +115,28 @@ internal static class OrganizerVerification
         check(new OrganizerStore(directory).ClockZoneIds[1] == "Tokyo Standard Time",
             "Selected world clock cities survive a restart");
 
+        var backgroundStore = new OrganizerStore(Path.Combine(directory, "background-reminders"));
+        var delivered = new System.Collections.Generic.List<string>();
+        var scheduler = new ReminderScheduler(System.Windows.Application.Current.Dispatcher, backgroundStore);
+        try
+        {
+            scheduler.Notification += (_, message) => delivered.Add(message);
+            check(!scheduler.IsScheduledForTest, "An empty reminder store needs no running timer or organizer panel");
+            var reminder = backgroundStore.AddReminder("Without opening Tools", DateTimeOffset.Now.AddMilliseconds(200));
+            for (var attempt = 0; delivered.Count == 0 && attempt < 30; attempt++) await Task.Delay(50);
+            check(delivered.SequenceEqual(new[] { "Reminder: Without opening Tools" })
+                && !scheduler.IsScheduledForTest, "Due reminders deliver once without constructing any organizer UI and stop their timer");
+            check(new OrganizerStore(Path.Combine(directory, "background-reminders")).Reminders.Single().Notified,
+                "Background reminder acknowledgement persists before notification delivery");
+            backgroundStore.UpdateReminder(reminder.Id, "Rescheduled", DateTimeOffset.Now.AddHours(1));
+            check(scheduler.IsScheduledForTest, "Editing a reminder reschedules the background timer");
+            scheduler.Dispose();
+            backgroundStore.UpdateReminder(reminder.Id, "After shutdown", DateTimeOffset.Now);
+            await Task.Delay(350);
+            check(!scheduler.IsScheduledForTest && delivered.Count == 1, "Disposal stops reminder delivery and releases the store subscription");
+        }
+        finally { scheduler.Dispose(); }
+
         var stopwatch = new OrganizerStopwatch();
         stopwatch.Toggle(); await Task.Delay(65); stopwatch.Toggle();
         var paused = stopwatch.Elapsed;

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Winisland.Services;
 using Forms = System.Windows.Forms;
@@ -25,6 +26,8 @@ public partial class App : Application
     private ShelfUploadService? _uploads;
     private FocusTimer? _focus;
     private UpdateService? _updates;
+    private WindowsNotificationService? _notifications;
+    private static BitmapImage? _localNotificationIcon;
     private bool _exiting;
     private NotchWindow? _notch;
     private SettingsWindow? _settingsWindow;
@@ -59,6 +62,10 @@ public partial class App : Application
         if (e.Args.Contains("--control-center-test"))
         {
             Shutdown(await ControlCenterVerification.RunStandaloneAsync(this, e.Args)); return;
+        }
+        if (e.Args.Contains("--resource-test"))
+        {
+            Shutdown(await ResourceVerification.RunAsync(this, e.Args)); return;
         }
         if (e.Args.Contains("--startup-test"))
         {
@@ -102,6 +109,10 @@ public partial class App : Application
     {
         if (_notch is null || _settings is null || _media is null) return;
         _notch.ContentRendered -= OnFirstNotchRendered;
+        _notifications = new WindowsNotificationService(Dispatcher);
+        _notifications.Received += (_, notification) => _notch?.ShowNotification(notification);
+        _settings.Changed += OnNotificationSettingsChanged;
+        OnNotificationSettingsChanged(this, EventArgs.Empty);
         _updates?.StartAutomaticChecks();
         await System.Windows.Threading.Dispatcher.Yield(DispatcherPriority.Background);
         if (_exiting) return;
@@ -156,11 +167,32 @@ public partial class App : Application
     }
     private void ShowNotification(string message)
     {
-        if (_tray is not null) _tray.ShowBalloonTip(4000, "Winisland", message, Forms.ToolTipIcon.Info);
+        if (_notch is not null && _settings?.Current.ShowNotifications == true) _notch.ShowNotification(CreateLocalNotification(message));
+    }
+    internal static Winisland.Models.NotchNotification CreateLocalNotification(string message)
+    {
+        if (_localNotificationIcon is null)
+        {
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.DecodePixelWidth = 40;
+            image.UriSource = new Uri("pack://application:,,,/Assets/Winisland.png");
+            image.EndInit(); image.Freeze();
+            _localNotificationIcon = image;
+        }
+        return new Winisland.Models.NotchNotification(Guid.NewGuid().ToString("N"), "Winisland", "Winisland", message, DateTimeOffset.UtcNow, _localNotificationIcon);
+    }
+    private void OnNotificationSettingsChanged(object? sender, EventArgs args)
+    {
+        if (_settings?.Current.ShowNotifications == true) _notifications?.Start();
+        else _notifications?.Stop();
     }
     protected override void OnExit(ExitEventArgs e)
     {
         _exiting = true;
+        if (_settings is not null) _settings.Changed -= OnNotificationSettingsChanged;
+        _notifications?.Dispose();
         _updates?.Dispose();
         _settingsWindow?.Close(); _notch?.CloseForShutdown(); _uploads?.Dispose(); _media?.Dispose(); _audio?.Dispose(); _playerVolume?.Dispose(); _focus?.Dispose();
         if (_tray is not null) { _tray.Visible = false; _tray.Icon?.Dispose(); _tray.Dispose(); }

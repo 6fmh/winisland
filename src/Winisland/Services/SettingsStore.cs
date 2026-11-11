@@ -14,6 +14,7 @@ public sealed record IslandSettings
     public bool HideInFullscreen { get; init; } = true;
     public bool ReducedMotion { get; init; }
     public bool ShowVolumeHud { get; init; } = true;
+    public bool ShowNotifications { get; init; } = true;
     public bool StartWithWindows { get; init; }
     public string MonitorDevice { get; init; } = "";
     public int FocusMinutes { get; init; } = 25;

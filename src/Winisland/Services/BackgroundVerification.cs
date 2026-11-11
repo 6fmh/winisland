@@ -13,7 +13,7 @@ namespace Winisland.Services;
 internal static class BackgroundVerification
 {
     internal static bool IsWorker => Environment.GetCommandLineArgs().Contains("--verification-worker");
-    internal static bool IsInvocation(string[] args) => args.Contains("--self-test") || args.Contains("--control-center-test") || args.Contains("--startup-test");
+    internal static bool IsInvocation(string[] args) => args.Contains("--self-test") || args.Contains("--control-center-test") || args.Contains("--startup-test") || args.Contains("--resource-test");
 
     internal static void SuppressSystemPrompts() => SetErrorMode(0x0001 | 0x0002 | 0x8000);
 

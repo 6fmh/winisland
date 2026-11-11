@@ -51,21 +51,24 @@ internal static class StartupVerification
             encoder.Frames.Add(BitmapFrame.Create(bitmap));
             using (var stream = File.Create(Path.Combine(output, "first-notch.png"))) encoder.Save(stream);
             var quietFirstFrame = notch.IsVisible && !notch.IsExpanded && !notch.IsActive;
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            var deferredWhileIdle = !notch.DeferredPanelsCreatedForTest;
             settings.Update(settings.Current with { ReducedMotion = true, HideInFullscreen = false });
             notch.SelectTabForTest("controls"); notch.Expand(false); notch.UpdateLayout();
             var controlsUsable = notch.FindName("ControlCenter") is Winisland.Controls.ControlCenterPanel panel && panel.IsVisible;
             notch.SelectTabForTest("calendar"); notch.UpdateLayout();
             var organizerUsable = notch.FindName("Organizer") is Winisland.Controls.OrganizerPanel organizer && organizer.IsVisible;
-            var passed = quietFirstFrame && deferredAtFirstFrame && controlsUsable && organizerUsable;
+            var passed = quietFirstFrame && deferredAtFirstFrame && deferredWhileIdle && controlsUsable && organizerUsable;
             await File.WriteAllTextAsync(Path.Combine(output, "results.json"), JsonSerializer.Serialize(new
             {
                 passed, desktop = BackgroundVerification.CurrentDesktop, profile = "fresh", constructionMs,
-                managedToVisibleMs, processToVisibleMs, deferredAtFirstFrame,
+                managedToVisibleMs, processToVisibleMs, deferredAtFirstFrame, deferredWhileIdle,
                 note = "Measured on a private Windows desktop, from worker process creation through the first rendered native notch. Excludes Windows sign-in scheduling.",
                 results = new[]
                 {
                     new { check = "First notch is rendered without activation on the private desktop", passed = quietFirstFrame },
                     new { check = "Player integrations and secondary panels do not block the first frame", passed = deferredAtFirstFrame },
+                    new { check = "Secondary panels remain unconstructed while idle", passed = deferredWhileIdle },
                     new { check = "Deferred Control Center loads on first selection", passed = controlsUsable },
                     new { check = "Deferred calendar loads on first selection", passed = organizerUsable }
                 }

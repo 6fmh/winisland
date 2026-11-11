@@ -78,14 +78,14 @@ internal static class AppleDeviceVerification
             // collapsed window can retain focus from earlier editing tests.
             foregroundFixture.Show(); foregroundFixture.Activate();
             await Settle();
-            foreach (var (width, height) in new[] { (185.0, 32.0), (160.0, 24.0), (320.0, 48.0) })
+            foreach (var (width, height) in new[] { (190.0, 32.0), (160.0, 24.0), (320.0, 48.0) })
             {
                 settings.Update(settings.Current with { NotchWidth = width, NotchHeight = height });
                 notch.ShowAppleDeviceForTest(pro);
                 await Settle();
                 assert(!notch.IsExpanded && !notch.IsActive && banner.IsVisible && banner.Opacity == 1,
                     $"Apple connection appears from the minimized notch without activation at {width:0} by {height:0} (expanded={notch.IsExpanded}, active={notch.IsActive}, visible={banner.IsVisible}, opacity={banner.Opacity})");
-                assert(island.ActualWidth == Math.Max(360, width + 64) && island.ActualHeight == height + 76,
+                assert(island.ActualWidth == Math.Max(NotchWindow.AppleConnectionMinimumWidth, width + 64) && island.ActualHeight == height + NotchWindow.AppleConnectionContentHeight,
                     $"Apple connection preserves the requested camera housing and leaves room for the illustration at {width:0} by {height:0}");
                 foreach (var name in new[] { "DeviceIllustration", "DeviceName" })
                 {
@@ -94,7 +94,7 @@ internal static class AppleDeviceVerification
                     assert(bounds.Top >= height && bounds.Left >= 20 && bounds.Right < island.ActualWidth - 20 && bounds.Bottom < island.ActualHeight - 14,
                         $"{name} stays below the camera and inside the rounded surface at {width:0} by {height:0}");
                 }
-                if (width == 185)
+                if (width == 190)
                 {
                     Save(notch, island, Path.Combine(output, "apple-device-airpods-pro.png"), 1);
                     Save(notch, island, Path.Combine(output, "apple-device-airpods-pro-200.png"), 2);
@@ -105,7 +105,22 @@ internal static class AppleDeviceVerification
                     "Dismissing an Apple connection restores the configured compact notch");
             }
 
-            settings.Update(settings.Current with { NotchWidth = 185, NotchHeight = 32 });
+            settings.Update(settings.Current with { NotchWidth = 190, NotchHeight = 32 });
+            const string longName = "Alexandra's personalized AirPods Pro for a very long device name";
+            notch.ShowAppleDeviceForTest(new("long-name", longName, AppleDeviceKind.AirPodsPro));
+            await Settle();
+            var nameLabel = Find<TextBlock>("DeviceName");
+            var nameBounds = nameLabel.TransformToAncestor(island).TransformBounds(new Rect(nameLabel.RenderSize));
+            assert(nameLabel.Text == longName && Equals(nameLabel.ToolTip, longName) && nameLabel.IsHitTestVisible
+                && nameLabel.TextTrimming == TextTrimming.CharacterEllipsis && nameBounds.Right <= island.ActualWidth - 30,
+                "Personalized Apple device names stay inside the card and expose their complete name through hover help");
+            assert(Find<TextBlock>("DeviceStatus").Text == "Connected", "Wireless connection status shows only the confirmed connection without invented battery information");
+            Save(notch, island, Path.Combine(output, "apple-device-long-name.png"), 1);
+            notch.DismissAppleDeviceForTest();
+            notch.ShowAppleDeviceForTest(new("wired-phone", "iPhone", AppleDeviceKind.iPhone, true));
+            await Settle();
+            assert(Find<TextBlock>("DeviceStatus").Text == "Connected via USB", "A wired Apple device reports its actual USB connection rather than implying an audio connection");
+            notch.DismissAppleDeviceForTest();
             foreach (var kind in new[] { AppleDeviceKind.AirPods, AppleDeviceKind.AirPodsMax, AppleDeviceKind.Keyboard, AppleDeviceKind.Mouse, AppleDeviceKind.Trackpad, AppleDeviceKind.iPhone, AppleDeviceKind.iPad })
             {
                 notch.ShowAppleDeviceForTest(new(kind.ToString(), kind switch { AppleDeviceKind.Keyboard => "Magic Keyboard", AppleDeviceKind.AirPodsMax => "AirPods Max", _ => kind.ToString() }, kind));
@@ -129,17 +144,33 @@ internal static class AppleDeviceVerification
 
             settings.Update(settings.Current with { ReducedMotion = false });
             notch.ShowAppleDeviceForTest(pro);
+            notch.Expand(false);
+            notch.Collapse();
             await Task.Delay(90);
+            var deviceScale = (ScaleTransform)((TransformGroup)banner.RenderTransform).Children[0];
+            assert(deviceScale.ScaleX == 1 && deviceScale.ScaleY == 1,
+                "Apple connection text remains at native scale throughout the entrance");
+            assert(banner.IsVisible && banner.Opacity >= 0 && banner.Opacity <= 1,
+                "Opening and immediately closing a connection moment preserves a bounded, visible entrance");
             var progressWidth = island.ActualWidth;
             settings.Update(settings.Current with { ReducedMotion = true });
             await Settle();
-            assert(banner.Opacity == 1 && Find<NotchSurface>("Surface").Expansion == .25 && island.ActualWidth == 360,
+            assert(banner.Opacity == 1 && Find<NotchSurface>("Surface").Expansion == .25 && island.ActualWidth == NotchWindow.AppleConnectionMinimumWidth,
                 "Enabling reduced motion finishes an active Apple connection spring and content entrance immediately");
-            assert(progressWidth >= 185 && progressWidth <= 364, "The Apple connection spring grows smoothly from the compact silhouette");
+            assert(progressWidth >= 190 && progressWidth <= NotchWindow.AppleConnectionMinimumWidth + 4, "The Apple connection spring grows smoothly from the compact silhouette");
+            notch.DismissAppleDeviceForTest();
+            settings.Update(settings.Current with { ReducedMotion = false });
+            notch.ShowAppleDeviceForTest(pro);
+            await Task.Delay(380);
+            var deviceOffset = (TranslateTransform)((TransformGroup)banner.RenderTransform).Children[1];
+            assert(banner.IsVisible && banner.Opacity == 1 && deviceOffset.Y == 0
+                && !banner.HasAnimatedProperties && !deviceOffset.HasAnimatedProperties,
+                "A visible Apple connection lands precisely and releases its completed fade and translation clocks");
+            settings.Update(settings.Current with { ReducedMotion = true });
             // The real timer must dismiss and restore the previous compact state.
             await Task.Delay(4600);
             await Settle();
-            assert(!banner.IsVisible && island.ActualWidth == 185 && island.ActualHeight == 32,
+            assert(!banner.IsVisible && island.ActualWidth == 190 && island.ActualHeight == 32,
                 "Apple connection automatically returns to the compact notch after its brief presentation");
         }
         finally { foregroundFixture.Close(); notch.DismissAppleDeviceForTest(); settings.Update(saved); notch.Collapse(); }

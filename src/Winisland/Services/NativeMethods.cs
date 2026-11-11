@@ -16,6 +16,7 @@ internal static class NativeMethods
     internal const int WmDpiChanged = 0x02E0;
     internal const int WmDisplayChange = 0x007E;
     internal const int WmMouseActivate = 0x0021;
+    internal const int WmDwmCompositionChanged = 0x031E;
     private const int GwlExStyle = -20;
     private const int WsExToolWindow = 0x80;
     private const int WsExNoActivate = 0x08000000;
@@ -42,6 +43,7 @@ internal static class NativeMethods
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr handle, out RectNative rect);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr handle);
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr handle);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr handle, int command);
     [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr handle, int attribute, out RectNative rect, int size);
     [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr handle, int attribute, out int value, int size);
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr handle, int attribute, ref int value, int size);
@@ -68,6 +70,13 @@ internal static class NativeMethods
     {
         var style = GetWindowLong(handle, GwlExStyle);
         SetWindowLong(handle, GwlExStyle, activate ? style & ~WsExNoActivate : style | WsExNoActivate);
+    }
+
+    internal static void RestoreOverlay(IntPtr handle)
+    {
+        if (IsIconic(handle)) ShowWindow(handle, 4); // SW_SHOWNOACTIVATE
+        SetWindowPos(handle, new IntPtr(-1), 0, 0, 0, 0,
+            0x0001 | 0x0002 | 0x0010 | 0x0040); // No size/move/activation; show and restore topmost.
     }
 
     internal static Forms.Screen ResolveScreen(string device)

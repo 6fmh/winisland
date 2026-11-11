@@ -25,7 +25,8 @@ public partial class OrganizerPanel : UserControl, IDisposable
     private readonly OrganizerStopwatch _stopwatch = new();
     private readonly DispatcherTimer _noteTimer = new(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(450) };
     private readonly DispatcherTimer _displayTimer = new(DispatcherPriority.Background);
-    private readonly DispatcherTimer _reminderTimer = new(DispatcherPriority.Background);
+    private readonly ReminderScheduler _reminders;
+    private readonly bool _ownsReminders;
     private readonly List<DayView> _days = new();
     private readonly List<ClockView> _clocks = new();
     private readonly DayOfWeek _firstWeekday = CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek;
@@ -34,7 +35,7 @@ public partial class OrganizerPanel : UserControl, IDisposable
     private string _selectedTool = "notes";
     private Guid? _editingEventId, _editingReminderId;
     private int _editingAllDayDuration = 1440;
-    private bool _initializing = true, _notesDirty, _disposed, _loaded, _clockDropdownOpen, _dialogOpen;
+    private bool _initializing = true, _notesDirty, _disposed, _clockDropdownOpen, _dialogOpen;
     private static readonly Brush Red = FrozenBrush(0xFF, 0x45, 0x3A);
     private static readonly Brush Muted = FrozenBrush(0x8A, 0x8A, 0x8E);
     private static readonly Brush Inactive = FrozenBrush(0x55, 0x55, 0x5A);
@@ -53,7 +54,7 @@ public partial class OrganizerPanel : UserControl, IDisposable
     internal int ClockCountForTest => _clocks.Count;
 
     public OrganizerPanel() : this(new OrganizerStore()) { }
-    internal OrganizerPanel(OrganizerStore store)
+    internal OrganizerPanel(OrganizerStore store, ReminderScheduler? reminders = null)
     {
         _store = store;
         InitializeComponent();
@@ -77,7 +78,9 @@ public partial class OrganizerPanel : UserControl, IDisposable
         NotesBox.Text = store.Note;
         _noteTimer.Tick += (_, _) => FlushEdits();
         _displayTimer.Tick += (_, _) => { if (_selectedTool == "clocks") UpdateClockTimes(); else UpdateStopwatch(); };
-        _reminderTimer.Tick += OnReminderDue;
+        _ownsReminders = reminders is null;
+        _reminders = reminders ?? new ReminderScheduler(Dispatcher, store);
+        if (_ownsReminders) _reminders.Notification += OnReminderNotification;
         _store.Changed += OnStoreChanged;
         SystemEvents.TimeChanged += OnSystemTimeChanged;
         Unloaded += (_, _) => { _displayTimer.Stop(); FlushEdits(); };
@@ -114,8 +117,7 @@ public partial class OrganizerPanel : UserControl, IDisposable
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        _loaded = true;
-        SynchronizeDisplayTimer(); ScheduleReminder();
+        SynchronizeDisplayTimer();
     }
 
     private void OnVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -367,7 +369,7 @@ public partial class OrganizerPanel : UserControl, IDisposable
     private void OnStoreChanged(object? sender, OrganizerChangedEventArgs e)
     {
         if (e.Change.HasFlag(OrganizerChange.Events)) RefreshCalendar();
-        if (e.Change.HasFlag(OrganizerChange.Reminders)) { RefreshReminders(); if (_loaded) ScheduleReminder(); }
+        if (e.Change.HasFlag(OrganizerChange.Reminders)) RefreshReminders();
         if (e.Change.HasFlag(OrganizerChange.Clocks))
         {
             for (var i = 0; i < _clocks.Count; i++)
@@ -379,25 +381,7 @@ public partial class OrganizerPanel : UserControl, IDisposable
         }
     }
 
-    private void ScheduleReminder()
-    {
-        _reminderTimer.Stop();
-        if (_disposed || !_loaded || _store.NextReminderDue is not { } due) return;
-        var delay = due - DateTimeOffset.Now;
-        _reminderTimer.Interval = TimeSpan.FromMilliseconds(Math.Clamp(delay.TotalMilliseconds, 250, TimeSpan.FromHours(1).TotalMilliseconds));
-        _reminderTimer.Start();
-    }
-    private void OnReminderDue(object? sender, EventArgs e)
-    {
-        _reminderTimer.Stop();
-        try
-        {
-            foreach (var item in _store.TakeDueReminders(DateTimeOffset.Now)) Notification?.Invoke(this, "Reminder: " + item.Title);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        { Log.Error("Acknowledge organizer reminder", ex); }
-        ScheduleReminder();
-    }
+    private void OnReminderNotification(object? sender, string message) => Notification?.Invoke(this, message);
 
     private void OnSystemTimeChanged(object? sender, EventArgs e)
     {
@@ -405,7 +389,7 @@ public partial class OrganizerPanel : UserControl, IDisposable
         Dispatcher.BeginInvoke(() =>
         {
             if (_disposed) return;
-            TimeZoneInfo.ClearCachedData(); UpdateClockTimes(); ScheduleReminder();
+            TimeZoneInfo.ClearCachedData(); UpdateClockTimes();
             if (CalendarView.IsVisible) RefreshCalendar();
         });
     }
@@ -533,7 +517,12 @@ public partial class OrganizerPanel : UserControl, IDisposable
     {
         if (_disposed) return;
         FlushEdits(); _disposed = true;
-        _noteTimer.Stop(); _displayTimer.Stop(); _reminderTimer.Stop();
+        _noteTimer.Stop(); _displayTimer.Stop();
+        if (_ownsReminders)
+        {
+            _reminders.Notification -= OnReminderNotification;
+            _reminders.Dispose();
+        }
         _store.Changed -= OnStoreChanged;
         SystemEvents.TimeChanged -= OnSystemTimeChanged;
     }

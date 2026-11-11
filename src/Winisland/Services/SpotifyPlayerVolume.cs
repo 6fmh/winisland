@@ -16,6 +16,8 @@ public sealed class SpotifyPlayerVolume : IPlayerVolumeBackend, IPlayerVolumeNot
     private static readonly Regex VolumeName = new(@"volume|volym|lautst.rke|volumen|volum|громкост|音量|볼륨|음량", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private readonly Func<AutomationElement?>? _rootProvider;
     private readonly AutomationDispatcher _automation = new();
+    internal bool AutomationStartedForTest => _automation.Started;
+    internal bool AutomationThreadAliveForTest => _automation.ThreadAlive;
     private readonly SemaphoreSlim _presentationLock = new(1, 1);
     private AutomationElement? _slider;
     private AutomationPropertyChangedEventHandler? _volumeChanged;
@@ -334,8 +336,7 @@ public sealed class SpotifyPlayerVolume : IPlayerVolumeBackend, IPlayerVolumeNot
         if (_disposed) return;
         _disposed = true;
         if (Account is not null) { Account.Changed -= OnAccountChanged; Account.Dispose(); }
-        _ = _automation.InvokeAsync(() => { ForgetSlider(); return true; }, CancellationToken.None)
-            .ContinueWith(_ => _automation.Dispose(), TaskScheduler.Default);
+        _automation.Dispose(ForgetSlider);
     }
 
     private void ForgetSlider()
@@ -350,31 +351,56 @@ public sealed class SpotifyPlayerVolume : IPlayerVolumeBackend, IPlayerVolumeNot
     private sealed class AutomationDispatcher : IDisposable
     {
         private readonly TaskCompletionSource<Dispatcher> _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly Thread _thread;
+        private readonly object _gate = new();
+        private Thread? _thread;
         private bool _stopping;
-        public AutomationDispatcher()
+        internal bool Started { get { lock (_gate) return _thread is not null; } }
+        internal bool ThreadAlive { get { lock (_gate) return _thread?.IsAlive == true; } }
+        private void EnsureStarted()
         {
-            _thread = new Thread(() =>
+            lock (_gate)
             {
-                var dispatcher = Dispatcher.CurrentDispatcher;
-                _ready.TrySetResult(dispatcher);
-                Dispatcher.Run();
-            }) { IsBackground = true, Name = "Winisland player accessibility" };
-            _thread.SetApartmentState(ApartmentState.STA);
-            _thread.Start();
+                if (_stopping) throw new ObjectDisposedException(nameof(AutomationDispatcher));
+                if (_thread is not null) return;
+                // Browser playback and opening Settings do not need a Spotify
+                // accessibility thread, dispatcher, or its reserved stack.
+                _thread = new Thread(() =>
+                {
+                    var dispatcher = Dispatcher.CurrentDispatcher;
+                    _ready.TrySetResult(dispatcher);
+                    Dispatcher.Run();
+                }) { IsBackground = true, Name = "Winisland player accessibility" };
+                _thread.SetApartmentState(ApartmentState.STA);
+                _thread.Start();
+            }
         }
         public async Task<T> InvokeAsync<T>(Func<T> action, CancellationToken cancellationToken)
         {
-            if (_stopping) throw new ObjectDisposedException(nameof(AutomationDispatcher));
+            cancellationToken.ThrowIfCancellationRequested();
+            EnsureStarted();
             var dispatcher = await _ready.Task.WaitAsync(cancellationToken);
             return await dispatcher.InvokeAsync(action, DispatcherPriority.Background, cancellationToken).Task;
         }
-        public void Dispose()
+        public void Dispose() => Dispose(null);
+        internal void Dispose(Action? cleanup)
         {
-            if (_stopping) return;
-            _stopping = true;
-            if (_ready.Task.IsCompletedSuccessfully) _ready.Task.Result.BeginInvokeShutdown(DispatcherPriority.Background);
-            else _ = _ready.Task.ContinueWith(t => t.Result.BeginInvokeShutdown(DispatcherPriority.Background), TaskScheduler.Default);
+            lock (_gate)
+            {
+                if (_stopping) return;
+                _stopping = true;
+                if (_thread is null) return;
+            }
+            _ = StopAsync(cleanup);
+        }
+        private async Task StopAsync(Action? cleanup)
+        {
+            var dispatcher = await _ready.Task.ConfigureAwait(false);
+            try
+            {
+                if (cleanup is not null)
+                    await dispatcher.InvokeAsync(cleanup, DispatcherPriority.Background).Task.ConfigureAwait(false);
+            }
+            finally { dispatcher.BeginInvokeShutdown(DispatcherPriority.Background); }
         }
     }
 

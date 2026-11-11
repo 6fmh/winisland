@@ -24,6 +24,7 @@ internal static class PlayerVolumeVerification
         await VerifyHostAsync(assert);
         await VerifyServiceAsync(dispatcher, assert);
         await VerifyBrowserAsync(assert);
+        await VerifyUnusedAccessibilityAsync(assert);
         await VerifyAccessibilityAsync(assert);
     }
 
@@ -197,6 +198,18 @@ internal static class PlayerVolumeVerification
         await WaitUntil(() => bridge.PlayerCount == 4, timeout.Token);
         var paused = await bridge.ReadAsync(media with { Title = "Shared title", IsPlaying = false }, timeout.Token);
         assert(paused.Available && paused.Volume == 55, "A paused selected title targets the paused browser player rather than another playing duplicate");
+        await SendState("5:0:1", "Shared title", 65, true, "Other artist");
+        await WaitUntil(() => bridge.PlayerCount == 5, timeout.Token);
+        var artistMatch = await bridge.ReadAsync(media with { Title = "Shared title", Artist = "Other artist" }, timeout.Token);
+        assert(artistMatch.Available && artistMatch.Volume == 65,
+            "Duplicate browser titles select a unique artist before comparing playback state");
+        var artistPlayback = await bridge.ReadAsync(media with { Title = "Shared title", Artist = "Fixture" }, timeout.Token);
+        assert(artistPlayback.Available && artistPlayback.Volume == 85,
+            "Duplicate title and artist metadata select playback state only within the artist matches");
+        assert(!(await bridge.ReadAsync(media with { Title = "Shared title", Artist = "Unknown artist" }, timeout.Token)).Available,
+            "Ambiguous playing browser tabs remain unavailable when artist metadata cannot disambiguate them");
+        await NativeMessagingProtocol.WriteAsync(connection, "{\"type\":\"remove\",\"id\":\"5:0:1\"}", timeout.Token);
+        await WaitUntil(() => bridge.PlayerCount == 4, timeout.Token);
         await NativeMessagingProtocol.WriteAsync(connection, "{\"type\":\"remove\",\"id\":\"1:0:1\"}", timeout.Token);
         await WaitUntil(() => bridge.PlayerCount == 3, timeout.Token);
         assert(!(await bridge.ReadAsync(media, timeout.Token)).Available, "Removed browser players immediately stop accepting volume commands");
@@ -204,8 +217,27 @@ internal static class PlayerVolumeVerification
         await WaitUntil(() => bridge.PlayerCount == 0, timeout.Token);
         assert(!bridge.IsConnected, "Closing a native browser connection removes its cached players");
 
-        Task SendState(string id, string title, double volume, bool playing = true) => NativeMessagingProtocol.WriteAsync(connection,
-            JsonSerializer.Serialize(new { type = "state", id, title, artist = "Fixture", volume, muted = false, playing, duration = 180, position = 12 }), timeout.Token);
+        Task SendState(string id, string title, double volume, bool playing = true, string artist = "Fixture") => NativeMessagingProtocol.WriteAsync(connection,
+            JsonSerializer.Serialize(new { type = "state", id, title, artist, volume, muted = false, playing, duration = 180, position = 12 }), timeout.Token);
+    }
+
+    private static async Task VerifyUnusedAccessibilityAsync(Action<bool, string> assert)
+    {
+        using var adapter = new SpotifyPlayerVolume();
+        assert(!adapter.AutomationStartedForTest && !adapter.AutomationThreadAliveForTest,
+            "Constructing the unused Spotify backend creates no dedicated accessibility thread");
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        try { await adapter.ReadAsync(new MediaSnapshot { HasSession = true, Source = "Spotify.exe" }, cancelled.Token); }
+        catch (OperationCanceledException) { }
+        assert(!adapter.AutomationStartedForTest,
+            "A cancelled first Spotify read does not start an accessibility worker");
+        adapter.Dispose();
+        var refused = false;
+        try { await adapter.ReadAsync(new MediaSnapshot { HasSession = true, Source = "Spotify.exe" }, CancellationToken.None); }
+        catch (ObjectDisposedException) { refused = true; }
+        assert(refused && !adapter.AutomationStartedForTest && !adapter.AutomationThreadAliveForTest,
+            "Disposing an unused Spotify backend prevents later reads from resurrecting its thread");
     }
 
     private static async Task VerifyAccessibilityAsync(Action<bool, string> assert)
@@ -217,9 +249,19 @@ internal static class PlayerVolumeVerification
         var handle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
         try
         {
-            using var adapter = new SpotifyPlayerVolume(() => AutomationElement.FromHandle(handle));
+            var providerThread = 0;
+            var providerApartment = ApartmentState.Unknown;
+            using var adapter = new SpotifyPlayerVolume(() =>
+            {
+                providerThread = Environment.CurrentManagedThreadId;
+                providerApartment = Thread.CurrentThread.GetApartmentState();
+                return AutomationElement.FromHandle(handle);
+            });
             var media = new MediaSnapshot { HasSession = true, Source = "Spotify.exe", Title = "Fixture" };
             var snapshot = await adapter.ReadAsync(media, CancellationToken.None);
+            assert(adapter.AutomationStartedForTest && adapter.AutomationThreadAliveForTest
+                && providerThread != Environment.CurrentManagedThreadId && providerApartment == ApartmentState.STA,
+                "First actual Spotify use starts its dedicated STA worker away from the UI thread");
             assert(snapshot.Available && Math.Abs(snapshot.Volume - 62) < .01, "Spotify's adapter recognizes a localized native volume accessibility slider");
             assert(await adapter.WriteAsync(snapshot with { Volume = 36.4 }, CancellationToken.None), "Spotify's adapter writes through the player's RangeValue pattern");
             assert(Math.Abs(slider.Value - .364) < .001, "Native player writes change the actual slider rather than an app audio session");
@@ -233,6 +275,11 @@ internal static class PlayerVolumeVerification
             await WaitUntil(() => Math.Abs(service.Current.Volume - 51.7) < .01, timeout.Token);
             assert(Math.Abs(service.Current.Volume - 51.7) < .01,
                 "Real accessibility volume events reach the notch service without a polling tick");
+            service.Dispose();
+            adapter.Dispose();
+            await WaitUntil(() => !adapter.AutomationThreadAliveForTest, timeout.Token);
+            assert(!adapter.AutomationThreadAliveForTest,
+                "Disposing a used Spotify backend removes its accessibility handler and ends the dedicated worker");
         }
         finally { window.Close(); }
     }

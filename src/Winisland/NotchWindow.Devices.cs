@@ -13,6 +13,8 @@ namespace Winisland;
 
 public partial class NotchWindow
 {
+    internal const double AppleConnectionMinimumWidth = 380;
+    internal const double AppleConnectionContentHeight = 84;
     private AppleDeviceService? _appleDevices;
     private AppleDeviceConnection? _deviceConnection;
     private readonly Queue<AppleDeviceConnection> _deviceQueue = new();
@@ -42,8 +44,10 @@ public partial class NotchWindow
         }
         _deviceConnection = connection;
         DeviceName.Text = connection.Name;
+        DeviceStatus.Text = connection.Wired ? "Connected via USB" : "Connected";
+        DeviceHeaderLabel.Text = connection.Wired ? "USB connected" : "Connected";
         DeviceIllustration.Kind = DeviceHeaderIllustration.Kind = connection.Kind;
-        var announcement = $"{connection.Name} connected";
+        var announcement = connection.Wired ? $"{connection.Name} connected via USB" : $"{connection.Name} connected";
         AutomationProperties.SetName(DeviceConnection, announcement);
         AutomationProperties.SetName(DeviceHeaderStatus, announcement);
         _hudTimer.Stop(); _showingHud = false;
@@ -59,29 +63,51 @@ public partial class NotchWindow
         var active = _deviceConnection is not null;
         DeviceHeaderStatus.Visibility = active && _expanded ? Visibility.Visible : Visibility.Collapsed;
         BatteryStatus.Visibility = _lastBattery is { HasBattery: true } && !(active && _expanded) ? Visibility.Visible : Visibility.Collapsed;
-        if (!active || _expanded)
+        if (!active || _expanded || _activeNotification is not null)
         {
             ++_deviceTransitionVersion;
-            DeviceConnection.BeginAnimation(OpacityProperty, null);
+            ResetDevicePresentation();
             DeviceConnection.Visibility = Visibility.Collapsed;
             return;
         }
-        ++_deviceTransitionVersion;
         CompactActivity.Visibility = Hud.Visibility = Visibility.Collapsed;
         DeviceConnection.Margin = new Thickness(30, _settings.Current.NotchHeight + 8, 30, 20);
         var wasHidden = DeviceConnection.Visibility != Visibility.Visible;
         DeviceConnection.Visibility = Visibility.Visible;
         if (entering || wasHidden)
         {
-            var duration = DurationFor(260);
-            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-            DeviceConnection.BeginAnimation(OpacityProperty, new DoubleAnimation(wasHidden ? 0 : DeviceConnection.Opacity, 1, duration) { EasingFunction = ease });
-            DeviceConnectionOffset.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(wasHidden ? -4 : DeviceConnectionOffset.Y, 0, duration) { EasingFunction = ease });
-            var scale = new DoubleAnimation(wasHidden ? .96 : DeviceConnectionScale.ScaleX, 1, duration) { EasingFunction = ease };
-            DeviceConnectionScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
-            DeviceConnectionScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
+            ++_deviceTransitionVersion;
+            var opacity = wasHidden ? 0 : DeviceConnection.Opacity;
+            var offset = wasHidden ? -3 : DeviceConnectionOffset.Y;
+            ResetDevicePresentation();
+            // Keep text at native scale and preserve the presented values when
+            // a queued connection interrupts an unfinished fade.
+            DeviceConnection.Opacity = opacity;
+            DeviceConnectionOffset.Y = offset;
+            var version = _deviceTransitionVersion;
+            var duration = DurationFor(220);
+            if (duration.TimeSpan == TimeSpan.Zero)
+            {
+                DeviceConnection.Opacity = 1;
+                DeviceConnectionOffset.Y = 0;
+            }
+            else
+            {
+                var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+                var fade = new DoubleAnimation(opacity, 1, duration) { EasingFunction = ease, FillBehavior = FillBehavior.Stop };
+                fade.Completed += (_, _) =>
+                {
+                    if (version != _deviceTransitionVersion) return;
+                    DeviceConnection.BeginAnimation(OpacityProperty, null);
+                    DeviceConnectionOffset.BeginAnimation(TranslateTransform.YProperty, null);
+                    DeviceConnection.Opacity = 1;
+                    DeviceConnectionOffset.Y = 0;
+                };
+                DeviceConnection.BeginAnimation(OpacityProperty, fade);
+                DeviceConnectionOffset.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(offset, 0, duration) { EasingFunction = ease, FillBehavior = FillBehavior.Stop });
+            }
         }
-        AnimateSize(Math.Max(360, _settings.Current.NotchWidth + 64), _settings.Current.NotchHeight + 76);
+        AnimateSize(Math.Max(AppleConnectionMinimumWidth, _settings.Current.NotchWidth + 64), _settings.Current.NotchHeight + AppleConnectionContentHeight);
         UpdateVisualizer();
     }
 
@@ -95,14 +121,25 @@ public partial class NotchWindow
         BatteryStatus.Visibility = _lastBattery is { HasBattery: true } ? Visibility.Visible : Visibility.Collapsed;
         if (immediate)
         {
-            DeviceConnection.BeginAnimation(OpacityProperty, null);
+            ResetDevicePresentation();
             DeviceConnection.Visibility = Visibility.Collapsed;
         }
         else if (DeviceConnection.Visibility == Visibility.Visible)
         {
-            var fade = new DoubleAnimation(DeviceConnection.Opacity, 0, DurationFor(120));
-            fade.Completed += (_, _) => { if (version == _deviceTransitionVersion) DeviceConnection.Visibility = Visibility.Collapsed; };
+            var opacity = DeviceConnection.Opacity;
+            var offset = DeviceConnectionOffset.Y;
+            ResetDevicePresentation();
+            DeviceConnection.Opacity = opacity;
+            DeviceConnectionOffset.Y = offset;
+            var fade = new DoubleAnimation(opacity, 0, DurationFor(120));
+            fade.Completed += (_, _) =>
+            {
+                if (version != _deviceTransitionVersion) return;
+                ResetDevicePresentation();
+                DeviceConnection.Visibility = Visibility.Collapsed;
+            };
             DeviceConnection.BeginAnimation(OpacityProperty, fade);
+            DeviceConnectionOffset.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(offset, -3, DurationFor(120)));
         }
         if (!immediate && _deviceQueue.TryDequeue(out var next)) OnAppleDeviceConnected(this, next);
         else if (!_expanded) UpdateCompact();
@@ -110,11 +147,17 @@ public partial class NotchWindow
 
     private void FinishDeviceAnimations()
     {
-        DeviceConnection.BeginAnimation(OpacityProperty, null); DeviceConnection.Opacity = _deviceConnection is not null ? 1 : 0;
+        ResetDevicePresentation();
+        DeviceConnection.Opacity = _deviceConnection is not null ? 1 : 0;
+        UpdateDevicePresentation();
+    }
+
+    private void ResetDevicePresentation()
+    {
+        DeviceConnection.BeginAnimation(OpacityProperty, null); DeviceConnection.Opacity = 0;
         DeviceConnectionOffset.BeginAnimation(TranslateTransform.YProperty, null); DeviceConnectionOffset.Y = 0;
         DeviceConnectionScale.BeginAnimation(ScaleTransform.ScaleXProperty, null); DeviceConnectionScale.ScaleX = 1;
         DeviceConnectionScale.BeginAnimation(ScaleTransform.ScaleYProperty, null); DeviceConnectionScale.ScaleY = 1;
-        UpdateDevicePresentation();
     }
 
     internal void ShowAppleDeviceForTest(AppleDeviceConnection connection) => OnAppleDeviceConnected(this, connection);

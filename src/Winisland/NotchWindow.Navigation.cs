@@ -15,7 +15,8 @@ public partial class NotchWindow
 {
     private bool _changingTab;
     private int _tabTransitionVersion;
-    private double ExpandedPanelHeight => _selectedTab switch
+    private double ExpandedPanelHeight => BaseExpandedPanelHeight + (_activeNotification is null ? 0 : NotificationFooterHeight);
+    private double BaseExpandedPanelHeight => _selectedTab switch
     {
         "controls" => NotchMetrics.ControlCenterExpandedHeight,
         "calendar" or "tools" => NotchMetrics.OrganizerExpandedHeight,
@@ -60,8 +61,9 @@ public partial class NotchWindow
             if (tab == "calendar") Organizer.ShowCalendar();
             else if (tab == "tools") Organizer.ShowTools();
 
-            ExpandedContent.Height = ExpandedPanelHeight - NotchMetrics.ContentBottomInset;
+            ExpandedContent.Height = BaseExpandedPanelHeight - NotchMetrics.ContentBottomInset;
             if (_expanded) AnimateSize(NotchMetrics.ExpandedWidth, ExpandedPanelHeight);
+            if (_activeNotification is not null) UpdateNotificationPresentation();
             if (!changed || !_expanded || _settings.Current.ReducedMotion || !SystemParameters.ClientAreaAnimation)
             {
                 FinishTabTransitions();

@@ -86,6 +86,8 @@ public partial class NotchWindow : Window
         _ownsPlayerVolume = playerVolume is null;
         _playerVolume = playerVolume ?? new PlayerVolumeService(Dispatcher, deferInitialization: true);
         InitializeComponent();
+        InitializeNotifications();
+        PreviewKeyDown += (_, args) => OnNotificationKeyDown(args);
         InitializeUpdates();
         InitializeFocus();
         InitializeAppleDevices();
@@ -93,6 +95,7 @@ public partial class NotchWindow : Window
         UpdateCameraSpace();
         SyncMotionPreference();
         SystemParameters.StaticPropertyChanged += OnSystemParametersChanged;
+        WatchOverlayVisibility();
         SetTab("music");
         ShelfItems.ItemsSource = shelf.Items;
         SourceInitialized += OnSourceInitialized;
@@ -170,11 +173,13 @@ public partial class NotchWindow : Window
                 NativeMethods.PositionOverlay(this, _settings.Current.MonitorDevice);
                 UpdateFullscreenVisibility();
             }, DispatcherPriority.Loaded);
+        if (message == NativeMethods.WmDwmCompositionChanged) QueueOverlayRecovery();
         return IntPtr.Zero;
     }
 
     private void OnSettingsChanged(object? sender, EventArgs e)
     {
+        if (!_settings.Current.ShowNotifications) DismissNotification(true);
         SyncMotionPreference();
         UpdateCameraSpace();
         SyncFocusSettings();
@@ -222,6 +227,7 @@ public partial class NotchWindow : Window
         UpdateFullscreenVisibility();
         if (!_playbackRendering && _expanded && _selectedTab == "music" && _media.Current.IsPlaying && !_seeking) UpdateTimeline();
         if (++_pulseCount % 4 != 1) return;
+        MaintainOverlayVisibility();
         var battery = NativeMethods.GetBattery();
         if (_lastBattery is not null && battery.PluggedIn != _lastBattery.PluggedIn && battery.HasBattery)
             ShowHud(battery.PluggedIn ? "Power connected" : "On battery", NotchIconKind.Battery, battery.Percent ?? 0, battery.Percent is { } percent ? $"{percent}%" : "—");
@@ -243,7 +249,7 @@ public partial class NotchWindow : Window
         {
             _fullscreenHidden = fullscreen;
             AnimateFullscreenVisibility(fullscreen);
-            if (fullscreen) { DismissDeviceConnection(true); Collapse(); }
+            if (fullscreen) { DismissNotification(true); DismissDeviceConnection(true); Collapse(); }
             UpdateVisualizer();
         }
     }
@@ -352,10 +358,11 @@ public partial class NotchWindow : Window
         PinGlyph.Foreground = pin ? (Brush)FindResource("Accent") : (Brush)FindResource("Muted");
         CompactActivity.Visibility = Hud.Visibility = Visibility.Collapsed;
         UpdateDevicePresentation();
-        ExpandedContent.Height = ExpandedPanelHeight - NotchMetrics.ContentBottomInset;
+        ExpandedContent.Height = BaseExpandedPanelHeight - NotchMetrics.ContentBottomInset;
         UpdateVisualizer();
         AnimateSize(NotchMetrics.ExpandedWidth, ExpandedPanelHeight);
         AnimateExpandedContent(true);
+        if (_activeNotification is not null) UpdateNotificationPresentation();
         if (_selectedTab == "controls") ControlCenter.SetActive(true);
         if (pin)
         {
@@ -392,7 +399,7 @@ public partial class NotchWindow : Window
 
     private void AnimateSize(double width, double height, int milliseconds = 600)
     {
-        var expansion = _expanded ? 1.0 : _deviceConnection is not null ? 0.25 : 0.0;
+        var expansion = _expanded ? 1.0 : _activeNotification is not null ? 0.65 : _deviceConnection is not null ? 0.25 : 0.0;
         if (_targetWidth == width && _targetHeight == height && _targetExpansion == expansion) return;
         _targetWidth = width; _targetHeight = height;
         _targetExpansion = expansion;
@@ -531,7 +538,7 @@ public partial class NotchWindow : Window
         _sizeMotion = null;
         Island.BeginAnimation(WidthProperty, null); Island.BeginAnimation(HeightProperty, null);
         if (_targetWidth >= 0) { Island.Width = _targetWidth; Island.Height = _targetHeight; }
-        Surface.BeginAnimation(NotchSurface.ExpansionProperty, null); Surface.Expansion = _expanded ? 1 : _deviceConnection is not null ? 0.25 : 0;
+        Surface.BeginAnimation(NotchSurface.ExpansionProperty, null); Surface.Expansion = _expanded ? 1 : _activeNotification is not null ? 0.65 : _deviceConnection is not null ? 0.25 : 0;
         ExpandedContent.BeginAnimation(OpacityProperty, null); ExpandedContent.Opacity = _expanded ? 1 : 0;
         ExpandedContent.Visibility = _expanded ? Visibility.Visible : Visibility.Collapsed;
         ContentOffset.BeginAnimation(TranslateTransform.YProperty, null); ContentOffset.Y = 0;
@@ -541,17 +548,20 @@ public partial class NotchWindow : Window
         DropHighlight.BeginAnimation(OpacityProperty, null); DropHighlight.Opacity = _dragActive ? 1 : 0;
         FinishTabTransitions();
         FinishDeviceAnimations();
+        if (_activeNotification is not null) UpdateNotificationPresentation();
         UpdateContour();
     }
     private void OnIslandEnter(object sender, MouseEventArgs e)
     {
         _pointerInside = true;
         _collapseTimer.Stop();
-        if (_settings.Current.ExpandOnHover && !_expanded) Expand(false);
+        if (_activeNotification is not null) _notificationTimer.Stop();
+        if (_activeNotification is null && _settings.Current.ExpandOnHover && !_expanded) Expand(false);
     }
     private void OnIslandLeave(object sender, MouseEventArgs e)
     {
         _pointerInside = false;
+        if (_activeNotification is not null) _notificationTimer.Start();
         _collapseTimer.Stop();
         CollapseIfPointerOutside();
     }
@@ -565,6 +575,7 @@ public partial class NotchWindow : Window
     }
     private void OnIslandClick(object sender, MouseButtonEventArgs e)
     {
+        if (_activeNotification is not null && _notificationBanner.IsMouseOver) { e.Handled = true; return; }
         if (!_pinned) { Expand(true); e.Handled = true; }
     }
     private void OnPinClick(object sender, RoutedEventArgs e)
@@ -581,11 +592,13 @@ public partial class NotchWindow : Window
     private void OnPlayerSetupClick(object sender, RoutedEventArgs e) => PlayerSettingsRequested?.Invoke(this, EventArgs.Empty);
     private async void OnIslandMouseDown(object sender, MouseButtonEventArgs e)
     {
+        if (_activeNotification is not null && _notificationBanner.IsMouseOver) return;
         if (e.ChangedButton == MouseButton.Middle && _media.Current.CanToggle)
         { e.Handled = true; await ReportControlAsync(_media.ToggleAsync()); }
     }
     private void OnIslandWheel(object sender, MouseWheelEventArgs e)
     {
+        if (_activeNotification is not null && (!_expanded || _notificationBanner.IsMouseOver)) { e.Handled = true; return; }
         if (_expanded) return;
         var audio = _playerVolume.Current;
         if (!audio.Available) return;
@@ -598,6 +611,7 @@ public partial class NotchWindow : Window
 
     private void UpdateCompact()
     {
+        if (_activeNotification is not null) { UpdateNotificationPresentation(); return; }
         if (_expanded || _showingHud) return;
         if (_deviceConnection is not null) { UpdateDevicePresentation(); return; }
         DeviceHeaderStatus.Visibility = Visibility.Collapsed;
@@ -675,7 +689,7 @@ public partial class NotchWindow : Window
 
     private void ShowHud(string title, NotchIconKind icon, double progress, string value)
     {
-        if (_expanded || _fullscreenHidden || _deviceConnection is not null) return;
+        if (_expanded || _fullscreenHidden || _deviceConnection is not null || _activeNotification is not null) return;
         _showingHud = true;
         CompactActivity.Visibility = Visibility.Collapsed; Hud.Visibility = Visibility.Visible;
         HudTitle.Text = title; HudGlyph.Kind = icon; HudValue.Text = value; HudProgress.Value = progress;
@@ -706,6 +720,8 @@ public partial class NotchWindow : Window
         try { _playerVolume.SetSource(media); }
         finally { _changingMediaSource = false; }
         RefreshAudio(false);
+        MusicPlaybackControls.Visibility = media.HasSession ? Visibility.Visible : Visibility.Collapsed;
+        MusicEmptyState.Visibility = media.HasSession ? Visibility.Collapsed : Visibility.Visible;
         TrackTitle.Text = media.HasSession ? media.Title : "No music playing";
         TrackArtist.Text = media.HasSession ? media.Artist : "Start a song in your favorite app";
         AlbumArtwork.Source = media.Artwork;
@@ -982,6 +998,8 @@ public partial class NotchWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _closed = true;
+        StopWatchingOverlayVisibility();
+        _notificationTimer.Stop(); _notificationQueue.Clear(); _activeNotification = null;
         if (_updates is not null) _updates.Changed -= OnUpdateChanged;
         ContentRendered -= OnFirstContentRendered;
         SystemParameters.StaticPropertyChanged -= OnSystemParametersChanged;
@@ -999,6 +1017,7 @@ public partial class NotchWindow : Window
             _organizer.EditingChanged -= OnOrganizerEditingChanged;
             _organizer.Dispose();
         }
+        _reminders?.Dispose();
         if (_controlCenter is not null)
         {
             _controlCenter.FocusRequested -= OnControlCenterFocus;

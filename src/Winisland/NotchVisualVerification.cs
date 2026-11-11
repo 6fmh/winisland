@@ -158,11 +158,27 @@ internal static class NotchVisualVerification
             var visibleControlsFit = new[] { "TrackTitle", "TrackArtist", "AlbumArtwork", "SeekSlider", "PreviousButton", "PlayButton", "NextButton", "VolumeSlider" }
                 .Select(Find<FrameworkElement>).Where(element => element.IsVisible).All(element => Contains(expandedBounds, Bounds(element, notch), 0.6));
             assert(visibleControlsFit, "Expanded title, artwork and media controls fit the shallow panel without clipping");
+            var headerCamera = Bounds(Find<FrameworkElement>("HeaderCameraSpace"), notch);
+            foreach (var name in new[] { "MusicTab", "FilesTab", "FocusTab", "CalendarTab", "ToolsTab", "ControlCenterTab" })
+            {
+                var tab = Find<RadioButton>(name);
+                var tabBounds = Bounds(tab, notch);
+                var hit = tab.InputHitTest(new Point(tab.ActualWidth / 2, 1));
+                assert(hit is not null && tab.ActualHeight >= 32
+                    && (tabBounds.Right <= headerCamera.Left + 0.6 || tabBounds.Left >= headerCamera.Right - 0.6),
+                    $"{name} accepts pointer input across its complete header slot outside the camera housing");
+            }
             var title = Find<TextBlock>("TrackTitle");
             var face = new Typeface(title.FontFamily, title.FontStyle, title.FontWeight, title.FontStretch);
             assert(face.TryGetGlyphTypeface(out var glyph) && glyph.FamilyNames.Values.Any(name => name == "Inter")
                 && glyph.FontUri.ToString().Contains("assets/fonts/", StringComparison.OrdinalIgnoreCase),
                 "Published notch text resolves to the bundled Inter font instead of an installed-font fallback");
+            var timerEditor = Find<TextBox>("TimerEditor");
+            var timerFace = new Typeface(timerEditor.FontFamily, timerEditor.FontStyle, timerEditor.FontWeight, timerEditor.FontStretch);
+            assert(timerFace.TryGetGlyphTypeface(out var timerGlyph) && timerGlyph.Weight == FontWeights.Light
+                && timerGlyph.FamilyNames.Values.Any(name => name == "Inter Display")
+                && System.Windows.Documents.Typography.GetNumeralAlignment(timerEditor) == FontNumeralAlignment.Tabular,
+                "Timer numerals retain their real light display face and tabular alignment alongside semibold settings headings");
             var bluePixels = new byte[8 * 8 * 4];
             for (var i = 0; i < bluePixels.Length; i += 4) { bluePixels[i] = 64; bluePixels[i + 3] = 255; }
             var blueArtwork = BitmapSource.Create(8, 8, 96, 96, PixelFormats.Bgra32, null, bluePixels, 8 * 4);
@@ -203,6 +219,28 @@ internal static class NotchVisualVerification
             notch.SelectTabForTest("music"); focus.Reset(25); media.SetSnapshotForTest(new MediaSnapshot());
             await Settle();
             await Capture("Waiting for music", "fidelity-expanded-empty");
+            assert(Find<FrameworkElement>("MusicEmptyState").IsVisible
+                && Find<FrameworkElement>("MusicPlaybackControls").Visibility == Visibility.Collapsed,
+                "No media session shows clear guidance and useful actions instead of disabled playback controls");
+            var emptyFits = new[] { "MusicEmptyState", "MusicEmptyFocusButton", "MusicEmptyFilesButton" }
+                .Select(Find<FrameworkElement>).All(element => Contains(expandedBounds, Bounds(element, notch), 0.6));
+            assert(emptyFits, "Idle guidance and both navigation actions fit the shallow music panel");
+            Find<Button>("MusicEmptyFocusButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Settle();
+            assert(Find<RadioButton>("FocusTab").IsChecked == true && Find<FrameworkElement>("FocusPanel").IsVisible,
+                "Idle music focus action opens the real focus timer without starting it");
+            notch.SelectTabForTest("music");
+            Find<Button>("MusicEmptyFilesButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await Settle();
+            assert(Find<RadioButton>("FilesTab").IsChecked == true && Find<FrameworkElement>("FilesPanel").IsVisible,
+                "Idle music file action opens the real shelf without opening a picker");
+            notch.SelectTabForTest("music");
+            media.SetSnapshotForTest(fixture);
+            await Settle();
+            assert(Find<FrameworkElement>("MusicEmptyState").Visibility == Visibility.Collapsed
+                && Find<FrameworkElement>("MusicPlaybackControls").IsVisible,
+                "A new media session replaces idle guidance with live playback controls automatically");
+            media.SetSnapshotForTest(new MediaSnapshot());
 
             notch.Collapse();
             notch.ShowHudForTest(NotchIconKind.Speaker, 64);
@@ -310,6 +348,119 @@ internal static class NotchVisualVerification
             await Capture("Focus complete", "fidelity-completion-hud");
             notch.Expand(false); notch.Collapse();
             await Settle();
+        }
+    }
+
+    internal static async Task VerifySettingsAsync(SettingsWindow window, SettingsStore store,
+        string output, Action<bool, string> assert)
+    {
+        BackgroundVerification.RequirePrivateDesktop();
+        var saved = store.Current;
+        var originalWidth = window.Width;
+        var originalHeight = window.Height;
+        var pages = new[] { "general", "appearance", "activities", "players", "uploads", "about" };
+        var navNames = new[] { "GeneralNav", "AppearanceNav", "ActivitiesNav", "PlayersNav", "UploadsNav", "AboutNav" };
+        var navs = navNames.Select(name => (Button)window.FindName(name)).ToArray();
+        var scroll = (ScrollViewer)window.FindName("PageScroll");
+        try
+        {
+            for (var index = 0; index < pages.Length; index++)
+            {
+                window.SelectPage(pages[index]);
+                await Settle();
+                var selected = navs[index];
+                var selectedSurface = (Border)selected.Template.FindName("Surface", selected);
+                var selectedColor = ((SolidColorBrush)selectedSurface.Background).Color;
+                assert(navs.Count(System.Windows.Controls.Primitives.Selector.GetIsSelected) == 1
+                    && System.Windows.Controls.Primitives.Selector.GetIsSelected(selected)
+                    && selectedColor.B > selectedColor.R + 100,
+                    $"Settings {pages[index]} has one persistent blue sidebar selection");
+                var labels = Descendants<TextBlock>(selected).ToArray();
+                assert(labels.Length > 0 && labels.All(label => label.Foreground is SolidColorBrush brush && brush.Color == Colors.White),
+                    $"Settings {pages[index]} selected labels inherit the high-contrast navigation foreground");
+            }
+            window.SelectPage("players");
+            await Settle();
+            scroll.ScrollToVerticalOffset(Math.Min(130, scroll.ScrollableHeight));
+            await Settle();
+            var rememberedOffset = scroll.VerticalOffset;
+            assert(rememberedOffset > 20, "Long settings content remains scrollable without reducing text size");
+            window.SelectPage("general");
+            await Settle();
+            assert(scroll.VerticalOffset < 0.6, "A new settings page starts at its own scroll position");
+            window.SelectPage("players");
+            await Settle();
+            assert(Math.Abs(scroll.VerticalOffset - rememberedOffset) < 0.6,
+                "Returning to a settings page restores its previous scroll position");
+
+            window.SelectPage("activities");
+            await Settle();
+            var hud = (CheckBox)window.FindName("HudToggle");
+            hud.BringIntoView();
+            hud.Focus();
+            await Settle();
+            var focusRing = (Border)hud.Template.FindName("FocusRing", hud);
+            assert(hud.IsKeyboardFocused && focusRing.BorderBrush is SolidColorBrush focusBrush && focusBrush.Color.A > 0,
+                "Settings switches expose a visible keyboard focus ring across their larger input surface");
+            hud.IsChecked = !saved.ShowVolumeHud;
+            await Settle();
+            assert(store.Current.ShowVolumeHud == !saved.ShowVolumeHud && new SettingsStore().Current.ShowVolumeHud == !saved.ShowVolumeHud,
+                "Settings toggle saves its real preference immediately and survives readback");
+            var status = (TextBlock)window.FindName("SaveStatus");
+            assert(!string.IsNullOrWhiteSpace(status.Text) && status.FontSize >= 11,
+                "Automatic settings save provides a readable inline status");
+            VerifyFooter("normal");
+
+            window.Width = 800; window.Height = 600;
+            foreach (var page in pages)
+            {
+                window.SelectPage(page);
+                scroll.ScrollToTop();
+                await Settle();
+                var title = (TextBlock)window.FindName("PageTitle");
+                var titleFace = new Typeface(title.FontFamily, title.FontStyle, title.FontWeight, title.FontStretch);
+                assert(title.FontSize >= 24 && titleFace.TryGetGlyphTypeface(out var glyph)
+                    && glyph.FamilyNames.Values.Any(name => name == "Inter Display")
+                    && glyph.Weight == FontWeights.SemiBold
+                    && Bounds(title, window).Right <= window.ActualWidth,
+                    $"Settings {page} resolves real semibold display typography inside an 800 by 600 window");
+                VerifyFooter(page + " 800 by 600");
+                Save(Render(window, 1), Path.Combine(output, $"settings-{page}-800.png"));
+            }
+        }
+        finally
+        {
+            ((CheckBox)window.FindName("HudToggle")).IsChecked = saved.ShowVolumeHud;
+            store.Update(saved);
+            window.Width = originalWidth; window.Height = originalHeight;
+            window.SelectPage("general");
+            scroll.ScrollToTop();
+            await Settle();
+        }
+
+        async Task Settle()
+        {
+            window.UpdateLayout();
+            await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+            await Task.Delay(25);
+            window.UpdateLayout();
+        }
+        void VerifyFooter(string state)
+        {
+            var button = (Button)window.FindName("RestoreDefaultsButton");
+            var parent = (FrameworkElement)button.Parent;
+            assert(button.ActualHeight >= 34 && Contains(Bounds(parent, window), Bounds(button, window), 0.6)
+                && button.InputHitTest(new Point(button.ActualWidth / 2, button.ActualHeight - 1)) is not null,
+                $"Restore defaults retains its complete visible and clickable footer surface at {state} size");
+        }
+        static IEnumerable<T> Descendants<T>(DependencyObject parent) where T : DependencyObject
+        {
+            for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, index);
+                if (child is T item) yield return item;
+                foreach (var nested in Descendants<T>(child)) yield return nested;
+            }
         }
     }
 
