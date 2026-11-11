@@ -165,8 +165,16 @@ internal static class NotificationCaptureVerification
         try
         {
             capture.Start(); productionFilter.Start(); fixture.Show();
+            // WPF constrains the initial window to the runner's display size.
+            // Resize only this private HWND so the oversized-host regression
+            // also exercises its real geometry on small CI monitors.
+            var dpi = VisualTreeHelper.GetDpi(fixture);
+            var resized = NativeMethods.SetWindowPos(handle, IntPtr.Zero, 0, 0,
+                (int)Math.Ceiling(2400 * dpi.DpiScaleX), (int)Math.Ceiling(1400 * dpi.DpiScaleY),
+                0x0010 | 0x0004); // SWP_NOACTIVATE | SWP_NOZORDER
+            fixture.UpdateLayout();
             var completed = await Task.WhenAny(received.Task, Task.Delay(3000));
-            assert(fixture.ActualWidth > 1600 && fixture.ActualHeight > 1000 && toast.ActualWidth == 320 && toast.ActualHeight == 120,
+            assert(resized && fixture.ActualWidth > 1600 && fixture.ActualHeight > 1000 && toast.ActualWidth == 320 && toast.ActualHeight == 120,
                 "The private fixture uses a monitor-sized transparent host around a small visible toast card");
             assert(completed == received.Task && received.Task.Result.Title == title.Text && received.Task.Result.Body == body.Text,
                 "A large transparent native shell host captures its small visible toast without applying card-size upper bounds to the host");
