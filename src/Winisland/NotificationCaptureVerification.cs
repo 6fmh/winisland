@@ -149,6 +149,7 @@ internal static class NotificationCaptureVerification
         var fixture = new Window
         {
             Title = "Private monitor-sized transparent toast host", Width = 2400, Height = 1400,
+            MinWidth = 2400, MinHeight = 1400,
             Left = 0, Top = 0, WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize,
             AllowsTransparency = true, Background = Brushes.Transparent,
             ShowInTaskbar = false, ShowActivated = false, Content = host
