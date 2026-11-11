@@ -88,8 +88,12 @@ jobs:
           Compress-Archive -Path "$evidenceDirectory/*" -DestinationPath "dist/installer/Winisland-Verification-$version.zip"
           $notes = Join-Path 'docs/releases' ($env:RELEASE_TAG + '.md')
           $assets = @(Get-ChildItem dist/installer/* | ForEach-Object FullName)
-          gh release view $env:RELEASE_TAG *> $null
+          $existingRelease = gh release view $env:RELEASE_TAG --json isDraft 2>$null
           if ($LASTEXITCODE -eq 0) {
+            if (!(($existingRelease | ConvertFrom-Json).isDraft)) {
+              Write-Output 'This version is already published; preserve its assets.'
+              exit 0
+            }
             gh release upload $env:RELEASE_TAG @assets --clobber
           } elseif (Test-Path -LiteralPath $notes) {
             gh release create $env:RELEASE_TAG @assets --verify-tag --draft --title "Winisland $($env:RELEASE_TAG.Substring(1))" --notes-file $notes
