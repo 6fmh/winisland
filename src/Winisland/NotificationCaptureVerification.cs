@@ -174,8 +174,11 @@ internal static class NotificationCaptureVerification
                 0x0010 | 0x0004); // SWP_NOACTIVATE | SWP_NOZORDER
             fixture.UpdateLayout();
             var completed = await Task.WhenAny(received.Task, Task.Delay(3000));
-            assert(resized && fixture.ActualWidth > 1600 && fixture.ActualHeight > 1000 && toast.ActualWidth == 320 && toast.ActualHeight == 120,
-                "The private fixture uses a monitor-sized transparent host around a small visible toast card");
+            // Window.ActualWidth/Height can still describe monitor-constrained
+            // WPF layout. The capture service reads the real native UIA bounds.
+            var bounds = AutomationElement.FromHandle(handle).Current.BoundingRectangle;
+            assert(resized && bounds.Width > 1600 && bounds.Height > 1000 && toast.ActualWidth == 320 && toast.ActualHeight == 120,
+                $"The private fixture uses a monitor-sized transparent host around a small visible toast card (native {bounds.Width}x{bounds.Height}, layout {fixture.ActualWidth}x{fixture.ActualHeight}, card {toast.ActualWidth}x{toast.ActualHeight})");
             assert(completed == received.Task && received.Task.Result.Title == title.Text && received.Task.Result.Body == body.Text,
                 "A large transparent native shell host captures its small visible toast without applying card-size upper bounds to the host");
             assert(ordinaryCount == 0,
