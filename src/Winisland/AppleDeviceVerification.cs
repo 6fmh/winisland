@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Windows.Devices.Bluetooth;
@@ -18,10 +19,11 @@ internal static class AppleDeviceVerification
 {
     internal static async Task RunAsync(NotchWindow notch, SettingsStore settings, string output, Action<bool, string> assert)
     {
-        const string proHardware = @"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&201B";
+        BackgroundVerification.RequirePrivateDesktop();
+        const string proHardware = @"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2024";
         var pro = AppleDeviceIdentity.Recognize("airpods", "AirPods - Find My", new[] { proHardware }, false)!;
         assert(pro is { Kind: AppleDeviceKind.AirPodsPro, Name: "AirPods Pro" }, "Real Apple Bluetooth vendor and product IDs recognize AirPods Pro even with a Find My driver name");
-        assert(AppleDeviceIdentity.Recognize("renamed", "AirPods Pro", new[] { @"BTHENUM\VID&0001054C_PID&201B" }, false) is null,
+        assert(AppleDeviceIdentity.Recognize("renamed", "AirPods Pro", new[] { @"BTHENUM\VID&0001054C_PID&2024" }, false) is null,
             "A non-Apple headset renamed AirPods Pro never triggers a connection notification");
         assert(AppleDeviceIdentity.Recognize("unknown", "AirPods", Array.Empty<string>(), false) is null,
             "An AirPods name without Apple hardware evidence stays silent");
@@ -85,7 +87,7 @@ internal static class AppleDeviceVerification
                 await Settle();
                 assert(!notch.IsExpanded && !notch.IsActive && banner.IsVisible && banner.Opacity == 1,
                     $"Apple connection appears from the minimized notch without activation at {width:0} by {height:0} (expanded={notch.IsExpanded}, active={notch.IsActive}, visible={banner.IsVisible}, opacity={banner.Opacity})");
-                assert(island.ActualWidth == Math.Max(NotchWindow.AppleConnectionMinimumWidth, width + 64) && island.ActualHeight == height + NotchWindow.AppleConnectionContentHeight,
+                assert(island.ActualWidth == Math.Max(NotchWindow.AppleConnectionMinimumWidth, width + 64) && island.ActualHeight == 2 * height + 80,
                     $"Apple connection preserves the requested camera housing and leaves room for the illustration at {width:0} by {height:0}");
                 foreach (var name in new[] { "DeviceIllustration", "DeviceName" })
                 {
@@ -106,6 +108,56 @@ internal static class AppleDeviceVerification
             }
 
             settings.Update(settings.Current with { NotchWidth = 190, NotchHeight = 32 });
+            foreach (var dynamic in new[] { false, true })
+            {
+                settings.Update(settings.Current with { UseDynamicIsland = dynamic });
+                notch.ShowAppleDeviceForTest(pro); await Settle();
+                assert(Find<Button>("DeviceDismissButton").ActualWidth == 44 && Find<Button>("DeviceDismissButton").ActualHeight == 44
+                    && Find<TextBlock>("DeviceStatus").Text == pro.ConnectionStatus && Find<TextBlock>("DeviceStatus").ActualHeight <= 36,
+                    "Accessory layouts have a 44-DIP dismiss target and show only the confirmed, bounded model status");
+                var illustration = Find<FrameworkElement>("DeviceIllustration");
+                var top = illustration.TranslatePoint(new Point(), island).Y;
+                var bottom = island.ActualHeight - top - illustration.ActualHeight;
+                var spacingDismiss = Find<Button>("DeviceDismissButton");
+                var dismissCenter = spacingDismiss.TranslatePoint(new Point(0, spacingDismiss.ActualHeight / 2), island).Y;
+                assert(Math.Abs(top - bottom) <= 1 && Math.Abs(dismissCenter - top - illustration.ActualHeight / 2) <= 1,
+                    "Accessory artwork and its dismiss target center with equal space above and below the black surface");
+                File.WriteAllText(Path.Combine(output, $"popup-spacing-device-{(dynamic ? "island" : "macbook")}.json"),
+                    System.Text.Json.JsonSerializer.Serialize(new { top, bottom, housingHeight = island.ActualHeight, illustrationHeight = illustration.ActualHeight, dismissCenter }));
+                foreach (var scale in new[] { 1.0, 1.25, 1.5, 2.0 })
+                    Save(notch, island, Path.Combine(output, $"popup-device-{(dynamic ? "island" : "macbook")}-{scale * 100:0}.png"), scale);
+                notch.DismissAppleDeviceForTest();
+            }
+            settings.Update(settings.Current with { UseDynamicIsland = true });
+            notch.SelectTabForTest("music");
+            notch.ShowAppleDeviceForTest(pro);
+            notch.Expand(true); await Settle();
+            var islandEntry = (Button)((DynamicIslandPlayer)notch.FindName("DynamicPlayer")).FindName("MenuButton");
+            var islandDismiss = Find<Button>("DeviceDismissButton");
+            assert(islandEntry.Focus() && NotificationVerification.FocusMovesTo(islandDismiss),
+                "Tab enters the accessory dismiss action from the actual expanded island player");
+            assert(NotificationVerification.FocusMovesTo(islandEntry),
+                "The accessory footer and island player share one bounded keyboard cycle");
+            assert(islandEntry.Focus() && NotificationVerification.FocusMovesTo(islandDismiss, FocusNavigationDirection.Previous),
+                "Reverse Tab reaches the accessory dismiss action from the actual expanded island player");
+            notch.ShowAppleDeviceForTest(pro with { Id = "keyboard-next-device", Name = "Queued AirPods" });
+            islandDismiss.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Settle();
+            assert(Find<TextBlock>("DeviceName").Text == "Queued AirPods" && NotificationVerification.HasVisibleFocusWithin(island),
+                "Advancing a keyboard-dismissed accessory preserves focus on a visible enabled notch control");
+            assert(NotificationVerification.FocusMovesTo(islandDismiss),
+                "The queued accessory dismiss control remains reachable through native Tab");
+            islandDismiss.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Settle();
+            assert(!banner.IsVisible && NotificationVerification.HasVisibleFocusWithin(island),
+                "Dismissing the final keyboard-focused accessory restores focus to visible enabled island controls");
+            assert(NotificationVerification.FocusMovesTo(islandEntry),
+                "Removing an accessory footer keeps keyboard traversal on visible island controls");
+            notch.ShowAppleDeviceForTest(pro); await Settle();
+            assert(islandEntry.Focus(), "The island player retains focus while a separate accessory is visible");
+            islandDismiss.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Settle();
+            assert(islandEntry.IsKeyboardFocused,
+                "Dismissing an unfocused accessory does not move focus from the current player control");
+            notch.Collapse();
+            settings.Update(settings.Current with { UseDynamicIsland = false });
             const string longName = "Alexandra's personalized AirPods Pro for a very long device name";
             notch.ShowAppleDeviceForTest(new("long-name", longName, AppleDeviceKind.AirPodsPro));
             await Settle();
@@ -140,6 +192,36 @@ internal static class AppleDeviceVerification
             assert(banner.IsVisible, "Closing the panel restores an unexpired Apple connection moment");
             notch.ShowAppleDeviceForTest(new("keyboard", "Magic Keyboard", AppleDeviceKind.Keyboard));
             assert(Find<TextBlock>("DeviceName").Text == pro.Name, "A second Apple connection queues instead of overwriting the first");
+            notch.ShowAppleDeviceForTest(new("keyboard", "Studio keyboard", AppleDeviceKind.Keyboard));
+            Find<Button>("DeviceDismissButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Settle();
+            assert(Find<TextBlock>("DeviceName").Text == "Studio keyboard", "Dismissing a connection advances to the latest metadata of the queued device");
+            notch.DismissAppleDeviceForTest();
+
+            notch.ShowAppleDeviceForTest(pro);
+            notch.ShowAppleDeviceForTest(pro with { Name = "Alex's AirPods Pro" }); await Settle();
+            assert(Find<TextBlock>("DeviceName").Text == "Alex's AirPods Pro", "A duplicate device event refreshes its name without creating a second popup");
+            banner.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseEnterEvent });
+            await Task.Delay(4700);
+            assert(banner.IsVisible, "Hover pauses the real accessory timeout while its model is being read");
+            banner.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = UIElement.MouseLeaveEvent });
+            notch.Activate();
+            var dismiss = Find<Button>("DeviceDismissButton");
+            assert(dismiss.Focus() && dismiss.IsKeyboardFocused, "The connection dismiss control accepts keyboard focus");
+            await Settle();
+            Save(notch, island, Path.Combine(output, "popup-device-keyboard-focus.png"), 1);
+            assert(NotificationVerification.HasBlueFocusPixels(dismiss), "The accessory dismiss target renders a visible circular keyboard focus outline");
+            await Task.Delay(4700);
+            assert(banner.IsVisible, "Keyboard focus pauses the real accessory timeout");
+            dismiss.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Settle();
+            assert(!banner.IsVisible, "The native connection dismiss button closes the focused moment");
+            Keyboard.ClearFocus(); foregroundFixture.Activate();
+
+            notch.ShowAppleDeviceForTest(pro);
+            notch.ShowNotification(new("device-interruption", "Messages", "Alex", "Let me know when you're ready.", DateTimeOffset.UtcNow));
+            await Task.Delay(4700);
+            assert(!banner.IsVisible && notch.ActiveNotificationForTest is not null, "A notification suspends the obscured accessory moment instead of spending its timeout");
+            notch.DismissNotificationForTest(true); await Settle();
+            assert(banner.IsVisible && Find<TextBlock>("DeviceName").Text == pro.Name, "Dismissing an interrupting notification restores the accessory for a full reading interval");
             notch.DismissAppleDeviceForTest();
 
             settings.Update(settings.Current with { ReducedMotion = false });

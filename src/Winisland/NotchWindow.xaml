@@ -10,24 +10,64 @@
  <Window.Resources><ResourceDictionary>
   <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="Controls/NotchStyles.xaml"/></ResourceDictionary.MergedDictionaries>
   <SolidColorBrush x:Key="ArtworkAccent" Color="#A0A0A5"/>
+  <SolidColorBrush x:Key="UpdateError" Color="#FF6961"/>
+  <Style x:Key="UpdateActionButton" TargetType="Button" BasedOn="{StaticResource NotchButton}">
+   <Setter Property="MinHeight" Value="44"/><Setter Property="MinWidth" Value="84"/>
+   <Setter Property="FontSize" Value="13"/><Setter Property="FontWeight" Value="Medium"/>
+   <Setter Property="Padding" Value="16,0"/><Setter Property="Background" Value="White"/><Setter Property="Foreground" Value="Black"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+    <Border x:Name="UpdateButtonSurface" Background="{TemplateBinding Background}" CornerRadius="22" Padding="{TemplateBinding Padding}" BorderBrush="Transparent" BorderThickness="2" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}">
+     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    </Border>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="UpdateButtonSurface" Property="Opacity" Value="0.88"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="UpdateButtonSurface" Property="Opacity" Value="0.65"/></Trigger>
+     <Trigger Property="IsEnabled" Value="False"><Setter TargetName="UpdateButtonSurface" Property="Opacity" Value="0.32"/></Trigger>
+     <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="UpdateButtonSurface" Property="BorderBrush" Value="{StaticResource KeyboardFocusBlue}"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="UpdateNotesScrollBar" TargetType="{x:Type ScrollBar}">
+   <Setter Property="Width" Value="8"/><Setter Property="MinWidth" Value="0"/><Setter Property="Background" Value="Transparent"/><Setter Property="Focusable" Value="False"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="{x:Type ScrollBar}">
+    <Grid Background="Transparent">
+     <Track x:Name="PART_Track" Orientation="{TemplateBinding Orientation}" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}" ViewportSize="{TemplateBinding ViewportSize}" IsDirectionReversed="True">
+      <Track.DecreaseRepeatButton><RepeatButton Command="{x:Static ScrollBar.PageUpCommand}" Focusable="False" IsTabStop="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton>
+      <Track.Thumb><Thumb MinHeight="24" Focusable="False">
+       <Thumb.Template><ControlTemplate TargetType="Thumb">
+        <Border x:Name="UpdateScrollThumb" Background="#636366" CornerRadius="2" Margin="2,0"/>
+        <ControlTemplate.Triggers>
+         <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="UpdateScrollThumb" Property="Background" Value="#8E8E93"/></Trigger>
+         <Trigger Property="IsDragging" Value="True"><Setter TargetName="UpdateScrollThumb" Property="Background" Value="#C7C7CC"/></Trigger>
+        </ControlTemplate.Triggers>
+       </ControlTemplate></Thumb.Template>
+      </Thumb></Track.Thumb>
+      <Track.IncreaseRepeatButton><RepeatButton Command="{x:Static ScrollBar.PageDownCommand}" Focusable="False" IsTabStop="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton>
+     </Track>
+    </Grid>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
  </ResourceDictionary></Window.Resources>
  <Grid>
   <Grid.RenderTransform><TranslateTransform x:Name="FullscreenOffset"/></Grid.RenderTransform>
   <Grid IsHitTestVisible="False" Opacity="{Binding Opacity, ElementName=Island}" Visibility="{Binding Visibility, ElementName=Island}">
    <controls:NotchSurface x:Name="ShadowSurface" Width="{Binding ActualWidth, ElementName=Island}" Height="{Binding ActualHeight, ElementName=Island}"
-    Expansion="{Binding Expansion, ElementName=Surface}" Opacity="{Binding Expansion, ElementName=Surface}" VerticalAlignment="Top" HorizontalAlignment="Center" UseLayoutRounding="False">
+    Expansion="{Binding Expansion, ElementName=Surface}" IsDynamicIsland="{Binding IsDynamicIsland, ElementName=Surface}"
+    Margin="{Binding Margin, ElementName=Island}" Opacity="{Binding Expansion, ElementName=Surface}" VerticalAlignment="Top" HorizontalAlignment="Center" UseLayoutRounding="False">
+    <controls:NotchSurface.RenderTransform><TranslateTransform X="{Binding X, ElementName=IslandOffset}"/></controls:NotchSurface.RenderTransform>
     <controls:NotchSurface.Effect><DropShadowEffect Color="Black" BlurRadius="14" ShadowDepth="3" Opacity="0.5"/></controls:NotchSurface.Effect>
    </controls:NotchSurface>
   </Grid>
   <Grid x:Name="Island" Width="{x:Static controls:NotchMetrics.DefaultWidth}" Height="{x:Static controls:NotchMetrics.DefaultHeight}" VerticalAlignment="Top" HorizontalAlignment="Center" UseLayoutRounding="False"
    MouseEnter="OnIslandEnter" MouseLeave="OnIslandLeave" MouseLeftButtonDown="OnIslandClick" MouseDown="OnIslandMouseDown" MouseWheel="OnIslandWheel"
-   AllowDrop="True" DragEnter="OnDragEnter" DragOver="OnDragOver" DragLeave="OnDragLeave" Drop="OnFilesDrop" SizeChanged="OnIslandSizeChanged">
+   AllowDrop="True" DragEnter="OnDragEnter" DragOver="OnDragOver" DragLeave="OnDragLeave" Drop="OnFilesDrop" SizeChanged="OnIslandSizeChanged" KeyboardNavigation.TabNavigation="Cycle">
+   <Grid.RenderTransform><TranslateTransform x:Name="IslandOffset"/></Grid.RenderTransform>
    <controls:NotchSurface x:Name="Surface"/>
    <Path x:Name="DropHighlight" Stroke="#B064D2FF" StrokeThickness="1" Opacity="0" IsHitTestVisible="False"/>
    <Grid x:Name="CompactActivity" Margin="6,0" HorizontalAlignment="Center" Visibility="Collapsed" IsHitTestVisible="False">
     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
     <Grid x:Name="CompactLeftWing" Width="30">
-     <Border Width="20" Height="20" CornerRadius="4" Background="#1C1C1E" HorizontalAlignment="Center" VerticalAlignment="Center">
+     <Border x:Name="CompactArtworkFrame" Width="20" Height="20" CornerRadius="4" Background="#1C1C1E" HorizontalAlignment="Center" VerticalAlignment="Center">
       <Grid>
        <controls:NotchIcon x:Name="CompactGlyph" Kind="Music" Width="14" Height="14" HorizontalAlignment="Center" VerticalAlignment="Center"/>
        <Image x:Name="CompactArtwork" Stretch="UniformToFill"><Image.Clip><RectangleGeometry Rect="0,0,20,20" RadiusX="4" RadiusY="4"/></Image.Clip></Image>
@@ -57,20 +97,25 @@
    </Grid>
    <Grid x:Name="DeviceConnection" Margin="30,40,30,20" Visibility="Collapsed" Opacity="0" Background="Transparent" RenderTransformOrigin="0.5,0.5" AutomationProperties.LiveSetting="Polite">
     <Grid.RenderTransform><TransformGroup><ScaleTransform x:Name="DeviceConnectionScale"/><TranslateTransform x:Name="DeviceConnectionOffset"/></TransformGroup></Grid.RenderTransform>
-    <Grid.ColumnDefinitions><ColumnDefinition Width="64"/><ColumnDefinition Width="16"/><ColumnDefinition/></Grid.ColumnDefinitions>
-    <controls:AppleDeviceGlyph x:Name="DeviceIllustration" Width="64" Height="56" VerticalAlignment="Center" IsHitTestVisible="False"/>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="80"/><ColumnDefinition Width="12"/><ColumnDefinition/><ColumnDefinition Width="44"/></Grid.ColumnDefinitions>
+    <controls:AppleDeviceGlyph x:Name="DeviceIllustration" Width="80" Height="64" VerticalAlignment="Center" IsHitTestVisible="False"/>
     <StackPanel Grid.Column="2" VerticalAlignment="Center">
-     <TextBlock x:Name="DeviceName" Text="AirPods Pro" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" ToolTipService.InitialShowDelay="400" ToolTipService.ShowDuration="4500"/>
-     <StackPanel Orientation="Horizontal" Margin="0,6,0,0" IsHitTestVisible="False">
-      <Ellipse Width="6" Height="6" Fill="{StaticResource SystemGreen}" VerticalAlignment="Center" Margin="0,0,7,0"/>
-      <TextBlock x:Name="DeviceStatus" Text="Connected" FontSize="12" Foreground="{StaticResource Muted}"/>
-     </StackPanel>
+     <TextBlock x:Name="DeviceName" Text="AirPods Pro" FontSize="16" LineHeight="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" ToolTipService.InitialShowDelay="400" ToolTipService.ShowDuration="4500"/>
+     <Grid Margin="0,6,4,0">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
+      <Ellipse Width="5" Height="5" Fill="{StaticResource SystemGreen}" VerticalAlignment="Top" HorizontalAlignment="Left" Margin="0,7,0,0" IsHitTestVisible="False"/>
+      <TextBlock x:Name="DeviceStatus" Grid.Column="1" Text="Connected" FontSize="13" LineHeight="18" MaxHeight="36" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" Foreground="#C7C7CC" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+     </Grid>
     </StackPanel>
+    <Button x:Name="DeviceDismissButton" Grid.Column="3" Width="44" Height="44" VerticalAlignment="Center"
+     Style="{DynamicResource PopupDismissButton}" ToolTip="Dismiss connection" AutomationProperties.Name="Dismiss connection" Click="OnDeviceDismiss">
+     <controls:NotchIcon Kind="Close" Width="12" Height="12" Foreground="#98989D"/>
+    </Button>
    </Grid>
-   <Grid x:Name="ExpandedContent" Width="578" Height="178" HorizontalAlignment="Center" VerticalAlignment="Top" Visibility="Collapsed" Opacity="0" RenderTransformOrigin="0.5,0" UseLayoutRounding="True" KeyboardNavigation.TabNavigation="Cycle">
+   <Grid x:Name="ExpandedContent" Width="578" Height="178" HorizontalAlignment="Center" VerticalAlignment="Top" Visibility="Collapsed" Opacity="0" RenderTransformOrigin="0.5,0" UseLayoutRounding="True" KeyboardNavigation.TabNavigation="Continue">
     <Grid.RenderTransform><TransformGroup><ScaleTransform x:Name="ContentScale"/><TranslateTransform x:Name="ContentOffset"/></TransformGroup></Grid.RenderTransform>
     <Grid.RowDefinitions><RowDefinition Height="32"/><RowDefinition Height="8"/><RowDefinition/></Grid.RowDefinitions>
-    <Grid>
+    <Grid x:Name="ExpandedHeader">
      <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
       <RadioButton x:Name="MusicTab" GroupName="Activity" Style="{StaticResource NotchTab}" Checked="OnMusicTab" ToolTip="Now playing · Ctrl+1" AutomationProperties.Name="Now playing">
@@ -97,9 +142,9 @@
       <RadioButton x:Name="ToolsTab" GroupName="Activity" Style="{StaticResource NotchTab}" Checked="OnToolsTab" ToolTip="Notes, reminders, clocks and stopwatch · Ctrl+5" AutomationProperties.Name="Tools" Margin="0,0,4,0">
        <controls:NotchIcon Kind="Grid" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
       </RadioButton>
-      <StackPanel x:Name="DeviceHeaderStatus" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,4,0" IsHitTestVisible="False" AutomationProperties.LiveSetting="Polite">
+      <StackPanel x:Name="DeviceHeaderStatus" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,4,0" Background="Transparent" AutomationProperties.LiveSetting="Polite">
        <controls:AppleDeviceGlyph x:Name="DeviceHeaderIllustration" Width="24" Height="22"/>
-       <TextBlock x:Name="DeviceHeaderLabel" Text="Connected" FontSize="10" Foreground="{StaticResource SystemGreen}" VerticalAlignment="Center" Margin="3,0,0,0"/>
+       <TextBlock x:Name="DeviceHeaderLabel" Text="Connected" FontSize="10" MaxWidth="108" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" Foreground="{StaticResource SystemGreen}" VerticalAlignment="Center" Margin="3,0,0,0"/>
       </StackPanel>
       <RadioButton x:Name="ControlCenterTab" GroupName="Activity" Style="{StaticResource NotchTab}" Checked="OnControlCenterTab" ToolTip="Control Center · Ctrl+6" AutomationProperties.Name="Control Center" Width="32" Margin="0,0,2,0">
        <controls:NotchIcon Kind="Controls" Width="17" Height="17" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
@@ -213,7 +258,7 @@
           </Grid>
           <Button.ContextMenu><ContextMenu>
            <MenuItem Header="Copy share link" Tag="{Binding}" Click="OnShelfCopy" IsEnabled="{Binding HasLink}"/>
-           <MenuItem Header="Copy direct file link" Tag="{Binding}" Click="OnShelfCopyDirect" IsEnabled="{Binding HasLink}"/>
+           <MenuItem Header="Copy direct file link" Tag="{Binding}" Click="OnShelfCopyDirect" IsEnabled="{Binding HasDirectLink}"/>
            <MenuItem Header="Open uploaded file" Tag="{Binding}" Click="OnShelfOpenLink" IsEnabled="{Binding HasLink}"/>
            <Separator/><MenuItem Header="Show in Explorer" Tag="{Binding}" Click="OnShelfReveal"/>
           </ContextMenu></Button.ContextMenu>
@@ -261,33 +306,77 @@
      </StackPanel>
     </Grid>
     <Grid x:Name="UpdatePanel" Grid.Row="2" Visibility="Collapsed">
-     <Grid.ColumnDefinitions><ColumnDefinition Width="90"/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
-     <Border Width="72" Height="72" CornerRadius="22" Background="{StaticResource ControlFill}" VerticalAlignment="Center">
-      <controls:NotchIcon Kind="Download" Width="32" Height="32" Foreground="{StaticResource ActivityBlue}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-     </Border>
-     <Grid Grid.Column="2">
-      <Grid.RowDefinitions><RowDefinition Height="22"/><RowDefinition/><RowDefinition Height="22"/><RowDefinition Height="5"/><RowDefinition Height="38"/></Grid.RowDefinitions>
-      <TextBlock x:Name="UpdateTitle" Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,4">
-       <TextBlock Text="{Binding Notes}" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
-      </ScrollViewer>
-      <Grid Grid.Row="2" AutomationProperties.LiveSetting="Polite">
-       <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="42"/></Grid.ColumnDefinitions>
-       <TextBlock x:Name="UpdateStatus" Text="{Binding Message}" FontSize="11" Foreground="{StaticResource Muted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding Message}"/>
-       <TextBlock Grid.Column="1" Text="{Binding Progress, StringFormat={}{0:0}%}" FontSize="10" Foreground="{StaticResource ActivityBlue}" HorizontalAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" Visibility="{Binding IsDownloading, Converter={StaticResource BoolVisibility}}"/>
-      </Grid>
-      <ProgressBar x:Name="UpdateProgress" Grid.Row="3" Value="{Binding Progress, Mode=OneWay}" Maximum="100" Height="3" Style="{StaticResource NotchProgressBar}" Foreground="{StaticResource ActivityBlue}" Visibility="{Binding IsDownloading, Converter={StaticResource BoolVisibility}}" AutomationProperties.Name="Update download progress"/>
-      <StackPanel Grid.Row="4" Orientation="Horizontal" VerticalAlignment="Bottom">
-       <Button x:Name="InstallUpdateButton" Content="Update and restart" Style="{StaticResource NotchButton}" Padding="12,6" Click="OnInstallUpdate" IsEnabled="{Binding CanInstall}" Visibility="{Binding HasUpdate, Converter={StaticResource BoolVisibility}}" AutomationProperties.Name="Download update, install and restart Winisland"/>
-       <Button x:Name="CancelUpdateButton" Content="Cancel" Style="{StaticResource NotchQuietButton}" Margin="8,0,0,0" Click="OnCancelUpdate" Visibility="{Binding CanCancel, Converter={StaticResource BoolVisibility}}" AutomationProperties.Name="Cancel update download"/>
-       <Button x:Name="CheckUpdatesButton" Content="Check for updates" Style="{StaticResource NotchQuietButton}" Margin="8,0,0,0" Click="OnCheckUpdates" IsEnabled="{Binding CanCheck}" AutomationProperties.Name="Check GitHub for updates"/>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <Grid x:Name="UpdateHeader">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <controls:NotchIcon x:Name="UpdateStateGlyph" Kind="Download" Width="36" Height="36" Foreground="{StaticResource ActivityBlue}" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+      <StackPanel Grid.Column="1">
+       <TextBlock x:Name="UpdateTitle" Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap"/>
+       <TextBlock x:Name="UpdateSubtitle" Text="{Binding Subtitle}" FontSize="12" Foreground="{StaticResource Muted}" Margin="0,4,0,0" TextWrapping="Wrap" Typography.NumeralAlignment="Tabular"/>
       </StackPanel>
+      <Button x:Name="FullReleaseNotesButton" Grid.Column="2" Content="View release ↗" Style="{StaticResource NotchQuietButton}" MinHeight="44" FontSize="12" Padding="10,0" Margin="12,0,-10,0" Click="OnViewUpdateRelease" Visibility="{Binding HasUpdate, Converter={StaticResource BoolVisibility}}" AutomationProperties.Name="View full release notes on GitHub"/>
      </Grid>
+     <Border x:Name="UpdateNotesSection" Grid.Row="1" BorderBrush="{StaticResource Separator}" BorderThickness="0,1,0,0" Padding="0,6,0,0" Margin="0,12,0,12" Visibility="{Binding HasUpdate, Converter={StaticResource BoolVisibility}}">
+      <Grid>
+       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+       <TextBlock Text="What's new" FontSize="13" FontWeight="SemiBold" Margin="0,8,0,8"/>
+       <controls:ReleaseNotesView x:Name="UpdateNotes" Grid.Row="1" Markdown="{Binding Notes}" FontSize="13" Foreground="#D0D0D4" FocusVisualStyle="{StaticResource NotchFocus}" AutomationProperties.Name="Release notes" AutomationProperties.HelpText="Read or select the release notes. Use Page Down to continue; Tab moves to the update controls.">
+        <controls:ReleaseNotesView.Resources><Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource UpdateNotesScrollBar}"/></controls:ReleaseNotesView.Resources>
+       </controls:ReleaseNotesView>
+       <TextBlock x:Name="UpdateNotesLimitHint" Grid.Row="2" Text="Showing a preview. View the release for the full notes." FontSize="12" Foreground="{StaticResource Muted}" Margin="0,6,0,0" TextWrapping="Wrap" Visibility="{Binding NotesTruncated, Converter={StaticResource BoolVisibility}}"/>
+      </Grid>
+     </Border>
+     <TextBlock x:Name="UpdateEmptyState" Grid.Row="1" Text="{Binding EmptyStateDescription}" FontSize="13" Foreground="{StaticResource Muted}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="48,6,0,14">
+      <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding HasUpdate}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+     </TextBlock>
+     <Border x:Name="UpdateFooter" Grid.Row="2" BorderBrush="{StaticResource Separator}" BorderThickness="0,1,0,0" Padding="0,12,0,0">
+      <Grid>
+       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+       <Grid>
+       <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="42"/></Grid.ColumnDefinitions>
+        <TextBlock x:Name="UpdateStatus" Text="{Binding Message}" FontSize="12" Foreground="{StaticResource Muted}" MinHeight="20" VerticalAlignment="Center" TextWrapping="Wrap" ToolTip="{Binding Message}" AutomationProperties.LiveSetting="Polite" AutomationProperties.Name="{Binding Message}"/>
+        <TextBlock x:Name="UpdatePercentage" Grid.Column="1" Text="{Binding Progress, StringFormat={}{0:0}%}" FontSize="12" Foreground="{StaticResource ActivityBlue}" HorizontalAlignment="Right" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" Visibility="{Binding IsDownloading, Converter={StaticResource BoolVisibility}}"/>
+       </Grid>
+       <ProgressBar x:Name="UpdateProgress" Grid.Row="1" Value="{Binding Progress, Mode=OneWay}" Maximum="100" Height="4" Margin="0,8,0,0" Style="{StaticResource NotchProgressBar}" Foreground="{StaticResource ActivityBlue}" Visibility="{Binding IsDownloading, Converter={StaticResource BoolVisibility}}" AutomationProperties.Name="Update download progress"/>
+       <Grid Grid.Row="2" Margin="0,12,0,0">
+        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <Button x:Name="CheckUpdatesButton" Content="{Binding CheckButtonLabel}" Click="OnCheckUpdates" IsEnabled="{Binding CanCheck}" MinWidth="164" HorizontalAlignment="Left" AutomationProperties.Name="Check for updates">
+         <Button.Style><Style TargetType="Button" BasedOn="{StaticResource UpdateActionButton}">
+          <Setter Property="Grid.Column" Value="0"/><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{StaticResource Muted}"/>
+          <Style.Triggers><DataTrigger Binding="{Binding HasUpdate}" Value="False"><Setter Property="Grid.Column" Value="2"/><Setter Property="Background" Value="White"/><Setter Property="Foreground" Value="Black"/></DataTrigger></Style.Triggers>
+         </Style></Button.Style>
+        </Button>
+        <Button x:Name="CancelUpdateButton" Grid.Column="1" Content="Cancel" Style="{StaticResource UpdateActionButton}" Background="{StaticResource ControlFill}" Foreground="White" Margin="0,0,8,0" Click="OnCancelUpdate" Visibility="{Binding CanCancel, Converter={StaticResource BoolVisibility}}" AutomationProperties.Name="Cancel update download"/>
+        <Button x:Name="InstallUpdateButton" Grid.Column="2" Content="{Binding InstallButtonLabel}" Style="{StaticResource UpdateActionButton}" MinWidth="164" Click="OnInstallUpdate" IsEnabled="{Binding CanInstall}" Visibility="{Binding HasUpdate, Converter={StaticResource BoolVisibility}}" AutomationProperties.Name="Download update, install and restart Winisland"/>
+       </Grid>
+      </Grid>
+     </Border>
     </Grid>
     <ContentControl x:Name="OrganizerHost" Grid.Row="2" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
     <ContentControl x:Name="ControlCenterHost" Grid.Row="2" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
+    <controls:DynamicIslandPlayer x:Name="DynamicPlayer" Grid.RowSpan="3" Visibility="Collapsed" HorizontalAlignment="Stretch" VerticalAlignment="Top" Panel.ZIndex="1"/>
+    <controls:DynamicIslandMenu x:Name="IslandMenuPanel" Grid.RowSpan="3" Visibility="Collapsed" HorizontalAlignment="Stretch" VerticalAlignment="Top" Panel.ZIndex="2"/>
    </Grid>
    <Rectangle x:Name="TopSeam" Height="1" Fill="Black" VerticalAlignment="Top" Margin="6,0" IsHitTestVisible="False"/>
   </Grid>
+  <Button x:Name="MinimalActivity" Width="{x:Static controls:DynamicIslandMetrics.MinimalSize}" Height="{x:Static controls:DynamicIslandMetrics.MinimalSize}"
+   HorizontalAlignment="Center" VerticalAlignment="Top" Visibility="Collapsed" Opacity="0" UseLayoutRounding="False"
+   Cursor="Hand" Click="OnMinimalActivityClick" ToolTip="Focus timer" AutomationProperties.Name="Open focus timer">
+   <Button.RenderTransform><TranslateTransform x:Name="MinimalOffset"/></Button.RenderTransform>
+   <Button.Template><ControlTemplate TargetType="Button">
+    <Border x:Name="MinimalSurface" Background="Black" CornerRadius="100" BorderThickness="0">
+     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    </Border>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="MinimalSurface" Property="Background" Value="#171719"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="MinimalSurface" Property="Opacity" Value="0.8"/></Trigger>
+     <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="MinimalSurface" Property="BorderBrush" Value="{StaticResource KeyboardFocusBlue}"/><Setter TargetName="MinimalSurface" Property="BorderThickness" Value="1.5"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Button.Template>
+   <Grid>
+    <controls:NotchIcon x:Name="MinimalGlyph" Kind="Timer" Width="18" Height="18" Foreground="{StaticResource FocusOrange}"/>
+    <TextBlock x:Name="MinimalTimerLabel" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource FocusOrange}" Typography.NumeralAlignment="Tabular" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+   </Grid>
+  </Button>
  </Grid>
 </Window>

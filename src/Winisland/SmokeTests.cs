@@ -54,6 +54,7 @@ internal static class SmokeTests
         {
             Phase("Update fixtures and UI");
             await UpdateVerification.RunAsync(app, output, (condition, name) => Assert(condition, name, results));
+            UiUpdateBugVerification.Run((condition, name) => Assert(condition, name, results));
             if (args.Contains("--updates-only"))
             {
                 await File.WriteAllTextAsync(Path.Combine(output, "results.json"), JsonSerializer.Serialize(new { passed = true, results }, new JsonSerializerOptions { WriteIndented = true }));
@@ -63,12 +64,15 @@ internal static class SmokeTests
             VerifyFailureReports(output, (condition, name) => Assert(condition, name, results));
             Phase("Spectrum analysis");
             SpectrumVerification.Run((condition, name) => Assert(condition, name, results));
+            Phase("AirPods model identity fixtures");
+            AirPodsModelVerification.Run(output, (condition, name) => Assert(condition, name, results));
             Phase("Browser registration");
             BrowserRegistrationVerification.Run(output, (condition, name) => Assert(condition, name, results));
             Phase("Player volume fixtures and native bridge");
             await PlayerVolumeVerification.RunAsync(app.Dispatcher, (condition, name) => Assert(condition, name, results));
             Phase("Spotify fixtures");
             await SpotifyVerification.RunAsync((condition, name) => Assert(condition, name, results));
+            await MediaBugVerification.RunAsync((condition, name) => Assert(condition, name, results));
             if (args.Contains("--spotify-only"))
             {
                 await SpotifyVerification.RunNotchAsync(app, (condition, name) => Assert(condition, name, results));
@@ -92,6 +96,8 @@ internal static class SmokeTests
             Assert(File.ReadAllText(file) == "Shelf operations must preserve this content.", "Removing shelf reference preserves original file", results);
             Phase("Upload fixtures");
             await UploadVerification.RunAsync((condition, name) => Assert(condition, name, results));
+            await DataBugVerification.RunAsync(output, (condition, name) => Assert(condition, name, results));
+            DataBugVerification.RunUi(output, (condition, name) => Assert(condition, name, results));
 
             focus.Start(1);
             await Task.Delay(100);
@@ -147,11 +153,16 @@ internal static class SmokeTests
             await VolumeMotionVerification.RunAsync(notch, (condition, name) => Assert(condition, name, results));
             await FocusVerification.RunAsync(notch, store, focus, (condition, name) => Assert(condition, name, results));
             await OrganizerVerification.RunAsync(output, (condition, name) => Assert(condition, name, results));
+            await ShelfInteractionVerification.RunAsync(notch, store, shelf, output,
+                (condition, name) => Assert(condition, name, results));
             await PlaybackVerification.RunAsync(notch, media, store, (condition, name) => Assert(condition, name, results),
                 name => Capture(notch, Path.Combine(output, name)));
             await AppleMotionVerification.RunAsync(app, notch, store, media, output,
                 (condition, name) => Assert(condition, name, results));
             await NotchVisualVerification.RunAsync(app, notch, store, media, focus, shelf, output,
+                (condition, name) => Assert(condition, name, results));
+            Phase("Dynamic Island appearance, player and motion");
+            await DynamicIslandVerification.RunAsync(app, notch, store, media, focus, output,
                 (condition, name) => Assert(condition, name, results));
             await ProductivityVisualVerification.RunAsync(notch, store, media, focus, output,
                 (condition, name) => Assert(condition, name, results));
@@ -162,6 +173,8 @@ internal static class SmokeTests
             Assert(notch.ActiveNotificationForTest?.AppName == "Messages", "Native accessibility capture delivers to the actual notch presentation", results);
             notch.DismissNotificationForTest(true);
             await AppleDeviceVerification.RunAsync(notch, store, output,
+                (condition, name) => Assert(condition, name, results));
+            await AirPodsModelVerification.RunUiAsync(notch, store, output,
                 (condition, name) => Assert(condition, name, results));
 
             var island = (FrameworkElement)notch.FindName("Island");
@@ -198,6 +211,23 @@ internal static class SmokeTests
                 && Math.Abs((recoveredRect.Left + recoveredRect.Right) / 2 - (screen.Left + screen.Right) / 2) <= 1
                 && GetForegroundWindow() == foregroundBeforeRecovery,
                 "Coalesced resume recovery shows and recenters the notch without stealing focus", results);
+            Assert(!notch.IsPinnedForTest && (GetWindowLong(handle, -20) & 0x08000000) != 0,
+                "Recovered idle overlay retains its native nonactivating policy", results);
+            notch.Expand(true);
+            await Settle(app);
+            var pinnedForeground = GetForegroundWindow();
+            notch.RecoverOverlayForTest();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Assert(notch.IsPinnedForTest && (GetWindowLong(handle, -20) & 0x08000000) == 0
+                && GetForegroundWindow() == pinnedForeground,
+                "Display or resume recovery preserves a pinned overlay's keyboard activation without changing foreground", results);
+            notch.Collapse();
+            var unpinnedForeground = GetForegroundWindow();
+            notch.RecoverOverlayForTest();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Assert(!notch.IsPinnedForTest && (GetWindowLong(handle, -20) & 0x08000000) != 0
+                && GetForegroundWindow() == unpinnedForeground,
+                "Display or resume recovery preserves a collapsed overlay's native nonactivating policy", results);
             Assert(NativeMethods.IsShellProcess("TextInputHost") && NativeMethods.IsShellProcess("InputApp")
                 && NativeMethods.IsShellProcess("shellhost"),
                 "Windows Quick Settings and input flyout hosts are excluded from fullscreen hiding regardless of process-name casing", results);

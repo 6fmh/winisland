@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Winisland.Services;
 
 namespace Winisland;
@@ -26,7 +27,7 @@ internal static class Program
                 BackgroundVerification.RequirePrivateDesktop();
                 // DWM throttles presentation on inactive desktops. Software
                 // rendering keeps verification clocks and PNG rendering local.
-                System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+                ConfigureVerificationRendering();
             }
             catch (Exception error)
             {
@@ -36,6 +37,21 @@ internal static class Program
         }
         else if (args.Contains("--verification-worker")) return 1;
 
+        // Native messaging uses stdio and a pipe; it needs no WPF dispatcher,
+        // application resources or UI assembly initialization.
+        if (BrowserNativeHost.IsHostInvocation(args))
+            return BrowserNativeHost.RunAsync(args).GetAwaiter().GetResult();
+        return RunApplication();
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ConfigureVerificationRendering() =>
+        System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+
+    // Keep WPF references out of the native-host entry point's JIT compilation.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int RunApplication()
+    {
         var app = new App();
         app.InitializeComponent();
         return app.Run();

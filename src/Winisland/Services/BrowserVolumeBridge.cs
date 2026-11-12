@@ -200,8 +200,20 @@ public sealed class BrowserVolumeBridge : IPlayerVolumeBackend, IPlayerVolumeNot
             if (!_players.ContainsKey(key) && (_players.Count >= 128 || _players.Values.Count(p => p.Client == client) >= 64)) return;
             // Normalize once when metadata arrives rather than for every
             // candidate on every active volume refresh. Keep only this form.
-            _players[key] = new BrowserPlayer(key, id, client, NormalizeTitle(GetText(root, "title", 512)), NormalizeTitle(GetText(root, "artist", 256)), volume,
-                GetBool(root, "muted"), GetBool(root, "playing"), Environment.TickCount64);
+            var title = NormalizeTitle(GetText(root, "title", 512));
+            var artist = NormalizeTitle(GetText(root, "artist", 256));
+            var muted = GetBool(root, "muted");
+            var playing = GetBool(root, "playing");
+            var seen = Environment.TickCount64;
+            if (_players.TryGetValue(key, out var existing) && existing.Title == title && existing.Artist == artist
+                && existing.Volume == volume && existing.Muted == muted && existing.Playing == playing)
+            {
+                // Heartbeats keep the target live without waking UI consumers
+                // or replacing unchanged player data. Seen is guarded by _gate.
+                existing.Seen = seen;
+                return;
+            }
+            _players[key] = new BrowserPlayer(key, id, client, title, artist, volume, muted, playing, seen);
         }
         Changed?.Invoke(this, EventArgs.Empty);
     }
@@ -266,7 +278,10 @@ public sealed class BrowserVolumeBridge : IPlayerVolumeBackend, IPlayerVolumeNot
         // thread waits on a browser process during shutdown.
     }
 
-    private sealed record BrowserPlayer(string Key, string Id, BrowserClient Client, string Title, string Artist, double Volume, bool Muted, bool Playing, long Seen);
+    private sealed record BrowserPlayer(string Key, string Id, BrowserClient Client, string Title, string Artist, double Volume, bool Muted, bool Playing, long Seen)
+    {
+        public long Seen { get; set; } = Seen;
+    }
     private sealed class PendingWrite
     {
         public string Id { get; }

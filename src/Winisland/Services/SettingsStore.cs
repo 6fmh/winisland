@@ -7,6 +7,7 @@ namespace Winisland.Services;
 
 public sealed record IslandSettings
 {
+    public bool UseDynamicIsland { get; init; }
     public double NotchWidth { get; init; } = NotchMetrics.DefaultWidth;
     public double NotchHeight { get; init; } = NotchMetrics.DefaultHeight;
     public bool ExpandOnHover { get; init; } = true;

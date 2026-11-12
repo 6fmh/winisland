@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using Winisland.Controls;
 using Winisland.Services;
 using Forms = System.Windows.Forms;
 
@@ -56,6 +57,8 @@ public partial class SettingsWindow : Window
     {
         _loading = true;
         var current = _settings.Current;
+        MacBookChoice.IsChecked = !current.UseDynamicIsland;
+        DynamicIslandChoice.IsChecked = current.UseDynamicIsland;
         HoverToggle.IsChecked = current.ExpandOnHover;
         FullscreenToggle.IsChecked = current.HideInFullscreen;
         StartupToggle.IsChecked = current.StartWithWindows;
@@ -86,6 +89,7 @@ public partial class SettingsWindow : Window
         {
             _settings.Update(_settings.Current with
             {
+                UseDynamicIsland = DynamicIslandChoice.IsChecked == true,
                 ExpandOnHover = HoverToggle.IsChecked == true,
                 HideInFullscreen = FullscreenToggle.IsChecked == true,
                 StartWithWindows = StartupToggle.IsChecked == true,
@@ -112,8 +116,17 @@ public partial class SettingsWindow : Window
         if (WidthLabel is null || HeightLabel is null) return;
         WidthLabel.Text = $"{WidthSlider.Value:0} DIPs";
         HeightLabel.Text = $"{HeightSlider.Value:0} DIPs";
-        NotchPreview.Width = WidthSlider.Value; NotchPreview.Height = HeightSlider.Value;
+        var island = DynamicIslandChoice.IsChecked == true;
+        PreviewSurface.IsDynamicIsland = island;
+        NotchPreview.Width = island ? DynamicIslandMetrics.IdleWidth : WidthSlider.Value;
+        NotchPreview.Height = island ? DynamicIslandMetrics.Height : HeightSlider.Value;
+        NotchPreview.Margin = new Thickness(0, island ? DynamicIslandMetrics.TopInset : 0, 0, 0);
+        MacBookSizeSettings.Visibility = island ? Visibility.Collapsed : Visibility.Visible;
+        AppearanceDescription.Text = island
+            ? "A floating pill that expands with your music and activities. Your MacBook size is kept for when you switch back."
+            : "The original MacBook silhouette, attached to the top of your display.";
     }
+    private void OnAppearanceChanged(object sender, RoutedEventArgs e) { UpdatePreview(); Save(); }
     private void OnSettingChanged(object sender, RoutedEventArgs e) => Save();
     private void OnSizeChanged(object sender, RoutedPropertyChangedEventArgs<double> e) { UpdatePreview(); Save(); }
     private void OnMonitorChanged(object sender, SelectionChangedEventArgs e) => Save();

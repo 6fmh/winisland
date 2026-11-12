@@ -18,6 +18,7 @@ internal static class ResourceVerification
     internal static async Task<int> RunAsync(App app, string[] args)
     {
         BackgroundVerification.RequirePrivateDesktop();
+        if (args.Contains("--performance-profile")) return await PerformanceVerification.RunAsync(app, args);
         var index = Array.IndexOf(args, "--output");
         var output = Path.GetFullPath(index >= 0 && index + 1 < args.Length ? args[index + 1] : "artifacts/resource-verification");
         Directory.CreateDirectory(output);

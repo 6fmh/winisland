@@ -29,7 +29,7 @@ Apple's notch is physical housing. The expandable music, shelf and connection UI
 
 All UI checks run through `scripts/Build.ps1 -Verify` or the guarded existing-candidate verifier on a private Windows desktop. They use fixture data and control-local input. They do not launch the user's app, alter personal data or drive the interactive desktop.
 
-Final integrated `Build.ps1 -Verify` passed **824 recorded results / 816 assertions** on the private Windows desktop. All 126 source, asset, script and license inputs match the tested snapshot. [The evidence record](../artifacts/design-polish/evidence.json) contains the exact source manifest, report and candidate hashes, desktop identity and reviewed screenshot hashes.
+Final integrated `Build.ps1 -Verify` passed **824 recorded results / 816 assertions** on the private Windows desktop. All 126 source, asset, script and license inputs match the tested snapshot. The local-only evidence record at `artifacts/design-polish/evidence.json` contains the exact source manifest, report and candidate hashes, desktop identity and reviewed screenshot hashes.
 
 The runtime checks prove actual semibold display glyph selection, light tabular timer figures, full footer control bounds and pointer hit regions, six settings pages at 800 by 600, persistent sidebar selection, per-page scroll, saved preference readback, idle actions, camera geometry at 100–200% raster scales, native-scale device transitions and released control/device animation clocks. The combined suite also verifies detached bounded artwork, notification fixtures and physical audio/mixer preservation.
 

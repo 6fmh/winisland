@@ -14,6 +14,60 @@ namespace Winisland;
 
 internal static class PlaybackVerification
 {
+    private static void VerifyTimelineFeedback(NotchWindow notch, MediaService media, SettingsStore settings, Action<bool, string> assert)
+    {
+        var savedSettings = settings.Current;
+        var savedMedia = media.Current;
+        var elapsed = (TextBlock)notch.FindName("ElapsedLabel");
+        var slider = (ScrubSlider)notch.FindName("SeekSlider");
+        var player = (DynamicIslandPlayer)notch.FindName("DynamicPlayer");
+        var islandSlider = (ScrubSlider)player.FindName("SeekSlider");
+        var islandElapsed = (TextBlock)player.FindName("ElapsedLabel");
+        var remaining = (TextBlock)player.FindName("RemainingLabel");
+        var fixture = new MediaSnapshot { HasSession = true, IsPlaying = false, CanSeek = true,
+            Source = "timeline-feedback-fixture", Title = "Timeline feedback",
+            Position = TimeSpan.FromSeconds(42), Duration = TimeSpan.FromSeconds(240) };
+        try
+        {
+            settings.Update(savedSettings with { UseDynamicIsland = false, ReducedMotion = true });
+            media.SetSnapshotForTest(fixture);
+            assert(elapsed.Text == "0:42" && slider.ToolTip as string == "0:42 / 4:00",
+                "MacBook timeline starts with the correct elapsed and duration feedback");
+            media.SetSnapshotForTest(fixture with { Duration = TimeSpan.FromSeconds(301) });
+            assert(elapsed.Text == "0:42" && slider.ToolTip as string == "0:42 / 5:01",
+                "Duration changes refresh seek feedback without waiting for a new elapsed second");
+            media.SetSnapshotForTest(fixture with { CanSeek = false });
+            assert(elapsed.Text == "0:42" && !slider.IsEnabled && slider.ToolTip as string == "Seeking unavailable for this app",
+                "Seek availability changes refresh feedback inside the same elapsed second");
+            media.SetSnapshotForTest(fixture);
+            assert(slider.IsEnabled && slider.ToolTip as string == "0:42 / 4:00",
+                "Re-enabled seeking restores duration feedback inside the same elapsed second");
+            settings.Update(settings.Current with { UseDynamicIsland = true });
+            assert(islandElapsed.Text == "0:42" && remaining.Text == "−3:18" && islandSlider.ToolTip as string == "0:42 / 4:00",
+                "Switching appearances restores the current island timeline and tooltip");
+            player.UpdateTimeline(42.49, 242.5, true);
+            assert(islandElapsed.Text == "0:42" && remaining.Text == "−3:21", "Fractional duration rounds remaining time independently of elapsed text");
+            player.UpdateTimeline(42.5, 242.5, true);
+            assert(islandElapsed.Text == "0:42" && remaining.Text == "−3:20" && Math.Abs(islandSlider.Value - 42.5) < .001,
+                "A subsecond remaining-time boundary updates without losing precise rail movement");
+            player.UpdateTimeline(42.5, 301, true);
+            assert(islandElapsed.Text == "0:42" && islandSlider.ToolTip as string == "0:42 / 5:01",
+                "Island duration feedback updates while elapsed text stays unchanged");
+            player.UpdateTimeline(42.5, 301, false);
+            assert(!islandSlider.IsEnabled && islandSlider.ToolTip as string == "Seeking unavailable for this app",
+                "Island availability feedback updates while elapsed text stays unchanged");
+            player.UpdateTimeline(42.5, 301, true);
+            assert(islandSlider.IsEnabled && islandSlider.ToolTip as string == "0:42 / 5:01",
+                "Island availability recovery restores the same-second duration tooltip");
+        }
+        finally
+        {
+            player.CancelInteraction();
+            settings.Update(savedSettings);
+            media.SetSnapshotForTest(savedMedia);
+        }
+    }
+
     private static void VerifyArtworkDecoding(Action<bool, string> check)
     {
         foreach (var (width, height) in new[] { (320, 160), (160, 320), (1, 10000), (32, 24) })
@@ -59,6 +113,7 @@ internal static class PlaybackVerification
     internal static async Task RunAsync(NotchWindow notch, MediaService media, SettingsStore settings, Action<bool, string> assert, Action<string> capture)
     {
         VerifyArtworkDecoding(assert);
+        VerifyTimelineFeedback(notch, media, settings, assert);
         var savedSettings = settings.Current;
         var commands = new List<double>();
         var pointer = new Point();

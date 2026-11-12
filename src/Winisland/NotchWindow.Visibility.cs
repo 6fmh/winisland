@@ -64,6 +64,7 @@ public partial class NotchWindow
         if (refreshDisplay)
         {
             NativeMethods.ConfigureOverlay(handle);
+            NativeMethods.SetActivatable(handle, _pinned);
             NativeMethods.PositionOverlay(this, _settings.Current.MonitorDevice);
             Island.InvalidateVisual();
         }

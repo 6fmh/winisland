@@ -27,6 +27,13 @@
    <Border BorderBrush="{StaticResource KeyboardFocusBlue}" BorderThickness="2" CornerRadius="12" Margin="1"/>
   </ControlTemplate></Setter.Value></Setter>
  </Style>
+ <Style x:Key="NotchCircularFocus" TargetType="Control">
+  <Setter Property="Template"><Setter.Value><ControlTemplate>
+   <Viewbox Stretch="Uniform" Margin="1">
+    <Ellipse Width="32" Height="32" Stroke="{StaticResource KeyboardFocusBlue}" StrokeThickness="2"/>
+   </Viewbox>
+  </ControlTemplate></Setter.Value></Setter>
+ </Style>
  <Style x:Key="NotchButton" TargetType="Button">
   <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
   <Setter Property="Foreground" Value="White"/><Setter Property="Background" Value="{StaticResource ControlFill}"/>
@@ -49,17 +56,63 @@
  <Style x:Key="NotchIconButton" TargetType="Button" BasedOn="{StaticResource NotchButton}">
   <Setter Property="Width" Value="32"/><Setter Property="Height" Value="32"/>
   <Setter Property="Padding" Value="0"/><Setter Property="Background" Value="Transparent"/>
+  <Setter Property="FocusVisualStyle" Value="{StaticResource NotchCircularFocus}"/>
+  <!-- Keep rectangular click targets, but fit a circle independently of the glyph. -->
+  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+   <Grid Background="Transparent">
+    <Border x:Name="Surface" Background="Transparent" Padding="{TemplateBinding Padding}" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}">
+     <Grid>
+      <Viewbox Stretch="Uniform" IsHitTestVisible="False">
+       <Border x:Name="Circle" Width="32" Height="32" CornerRadius="16" Background="{TemplateBinding Background}"/>
+      </Viewbox>
+      <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+     </Grid>
+    </Border>
+   </Grid>
+   <ControlTemplate.Triggers>
+    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Circle" Property="Background" Value="{StaticResource ControlHoverFill}"/></Trigger>
+    <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.65"/></Trigger>
+    <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Surface" Property="Opacity" Value="0.28"/></Trigger>
+   </ControlTemplate.Triggers>
+  </ControlTemplate></Setter.Value></Setter>
+ </Style>
+ <Style x:Key="PopupDismissButton" TargetType="Button" BasedOn="{StaticResource NotchIconButton}">
+  <Setter Property="Width" Value="44"/><Setter Property="Height" Value="44"/>
+  <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+   <Grid Background="Transparent">
+    <Border x:Name="Surface" Background="Transparent" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}">
+     <Grid>
+      <Viewbox Stretch="Uniform" Margin="2" IsHitTestVisible="False">
+       <Border x:Name="Circle" Width="32" Height="32" CornerRadius="16" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="1.5"/>
+      </Viewbox>
+      <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+     </Grid>
+    </Border>
+   </Grid>
+   <ControlTemplate.Triggers>
+    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Circle" Property="Background" Value="{StaticResource ControlHoverFill}"/></Trigger>
+    <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Circle" Property="BorderBrush" Value="{StaticResource KeyboardFocusBlue}"/></Trigger>
+    <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.65"/></Trigger>
+    <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Surface" Property="Opacity" Value="0.28"/></Trigger>
+   </ControlTemplate.Triggers>
+  </ControlTemplate></Setter.Value></Setter>
  </Style>
  <Style x:Key="NotchPlaybackButton" TargetType="Button" BasedOn="{StaticResource NotchIconButton}">
   <Setter Property="Width" Value="40"/><Setter Property="Height" Value="40"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
    <Grid Background="Transparent">
-    <Border x:Name="Surface" Background="Transparent" CornerRadius="20" Margin="5" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}">
-     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    <Border x:Name="Surface" Background="Transparent" Margin="5" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}">
+     <Grid>
+      <Viewbox Stretch="Uniform" IsHitTestVisible="False">
+       <Border x:Name="Circle" Width="32" Height="32" CornerRadius="16" Background="{TemplateBinding Background}"/>
+      </Viewbox>
+      <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+     </Grid>
     </Border>
    </Grid>
    <ControlTemplate.Triggers>
-    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="{StaticResource ControlSelectedFill}"/></Trigger>
+    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Circle" Property="Background" Value="{StaticResource ControlSelectedFill}"/></Trigger>
     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.65"/></Trigger>
     <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Surface" Property="Opacity" Value="0.28"/></Trigger>
    </ControlTemplate.Triggers>
@@ -75,16 +128,21 @@
  <Style x:Key="NotchTab" TargetType="RadioButton">
   <Setter Property="Width" Value="46"/><Setter Property="Height" Value="32"/>
   <Setter Property="Foreground" Value="{StaticResource Muted}"/><Setter Property="Cursor" Value="Hand"/>
-  <Setter Property="FocusVisualStyle" Value="{StaticResource NotchFocus}"/>
+  <Setter Property="FocusVisualStyle" Value="{StaticResource NotchCircularFocus}"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
    <Grid Background="Transparent">
-    <Border x:Name="Surface" Background="Transparent" Height="26" VerticalAlignment="Center" CornerRadius="13" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}">
-     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    <Border x:Name="Surface" Background="Transparent" Height="26" VerticalAlignment="Center" controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}">
+     <Grid>
+      <Viewbox Stretch="Uniform" IsHitTestVisible="False">
+       <Border x:Name="Circle" Width="26" Height="26" CornerRadius="13" Background="Transparent"/>
+      </Viewbox>
+      <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+     </Grid>
     </Border>
    </Grid>
    <ControlTemplate.Triggers>
-    <Trigger Property="IsChecked" Value="True"><Setter TargetName="Surface" Property="Background" Value="{StaticResource ControlSelectedFill}"/><Setter Property="Foreground" Value="White"/></Trigger>
-    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="{StaticResource ControlHoverFill}"/><Setter Property="Foreground" Value="White"/></Trigger>
+    <Trigger Property="IsChecked" Value="True"><Setter TargetName="Circle" Property="Background" Value="{StaticResource ControlSelectedFill}"/><Setter Property="Foreground" Value="White"/></Trigger>
+    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Circle" Property="Background" Value="{StaticResource ControlHoverFill}"/><Setter Property="Foreground" Value="White"/></Trigger>
     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="Opacity" Value="0.65"/></Trigger>
     <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Surface" Property="Opacity" Value="0.35"/></Trigger>
    </ControlTemplate.Triggers>

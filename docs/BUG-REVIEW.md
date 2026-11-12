@@ -1,6 +1,6 @@
 # Project bug review - 9 November 2026
 
-The bug-review team audited the native C#/WPF application, shipped browser companion, verification harnesses, build scripts and installer. Three subagents reviewed UI/runtime, media/browser integrations, and data/device services; the primary agent reviewed startup, native integration, verification isolation and packaging. The separate Apple fidelity team coordinated its concurrent changes through [communication.md](../communication.md).
+The bug-review team audited the native C#/WPF application, shipped browser companion, verification harnesses, build scripts and installer. Three subagents reviewed UI/runtime, media/browser integrations, and data/device services; the primary agent reviewed startup, native integration, verification isolation and packaging. The separate Apple fidelity team coordinated its concurrent changes through the local-only `communication.md` log.
 
 Review complete for the verified current source. All confirmed defects found in this review are fixed, and the final portable, Spotify and self-contained payload gates passed. The final audit matched all 101 application/assets/script/installer files in the isolated verification copy against the current worktree and verified the installer checksum. Exact evidence paths are recorded in `artifacts/bug-review/final-evidence.json`.
 

@@ -427,6 +427,59 @@ internal static class NotchVisualVerification
                 VerifyFooter(page + " 800 by 600");
                 Save(Render(window, 1), Path.Combine(output, $"settings-{page}-800.png"));
             }
+
+            // Exercise the actual controls at logical work-area sizes that can
+            // result from display scaling, without changing the host display.
+            var navigationScroll = (ScrollViewer)window.FindName("NavigationScroll");
+            foreach (var (width, height) in new[] { (640.0, 480.0), (820.0, 600.0), (950.0, 740.0) })
+            {
+                window.Width = width; window.Height = height;
+                foreach (var page in pages)
+                {
+                    window.SelectPage(page);
+                    scroll.ScrollToTop();
+                    await Settle();
+                    var panelName = page switch
+                    {
+                        "appearance" => "AppearancePanel", "activities" => "ActivitiesPanel",
+                        "players" => "PlayersPanel", "uploads" => "UploadsPanel",
+                        "about" => "AboutPanel", _ => "GeneralPanel"
+                    };
+                    var panel = (FrameworkElement)window.FindName(panelName);
+                    var pageControls = Descendants<Button>(panel).Cast<Control>()
+                        .Concat(Descendants<RadioButton>(panel)).ToArray();
+                    foreach (var control in navs.Concat(pageControls))
+                    {
+                        control.BringIntoView();
+                        if (control.IsEnabled) control.Focus();
+                        await Settle();
+                        var viewport = navs.Contains(control) ? navigationScroll : scroll;
+                        var name = System.Windows.Automation.AutomationProperties.GetName(control);
+                        if (string.IsNullOrWhiteSpace(name)) name = control.Name.Length > 0 ? control.Name : (control as ContentControl)?.Content?.ToString() ?? "action";
+                        assert(control.ActualWidth > 0 && control.ActualHeight >= 34
+                            && Contains(Bounds(viewport, window), Bounds(control, window), 0.6)
+                            && (!control.IsEnabled || control.IsKeyboardFocused
+                                && control.InputHitTest(new Point(control.ActualWidth / 2, control.ActualHeight / 2)) is not null),
+                            $"Settings {page} {name} remains fully visible and locally focusable at {width:0} by {height:0}");
+                    }
+
+                    var expected = navs.Concat(pageControls).Where(control => control.IsEnabled).ToHashSet();
+                    var visited = new HashSet<Control>();
+                    navs[0].Focus();
+                    for (var step = 0; step < 200 && !expected.IsSubsetOf(visited); step++)
+                    {
+                        if (System.Windows.Input.Keyboard.FocusedElement is not FrameworkElement focused) break;
+                        if (focused is Control control) visited.Add(control);
+                        if (!focused.MoveFocus(new System.Windows.Input.TraversalRequest(System.Windows.Input.FocusNavigationDirection.Next))) break;
+                    }
+                    assert(expected.IsSubsetOf(visited),
+                        $"Native Tab traversal reaches every enabled {page} action and sidebar choice at {width:0} by {height:0}");
+                    VerifyFooter(page + $" {width:0} by {height:0}");
+                    scroll.ScrollToTop(); navigationScroll.ScrollToTop();
+                    await Settle();
+                    Save(Render(window, 1), Path.Combine(output, $"settings-{page}-{width:0}x{height:0}.png"));
+                }
+            }
         }
         finally
         {

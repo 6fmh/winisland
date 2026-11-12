@@ -14,7 +14,13 @@ public sealed class AppleDeviceService : IDisposable
     private const string ConnectedProperty = "System.Devices.Aep.IsConnected";
     private const string ContainerProperty = "System.Devices.ContainerId";
     private const string AepContainerProperty = "System.Devices.Aep.ContainerId";
-    private static readonly string[] Properties = { ConnectedProperty, ContainerProperty, AepContainerProperty, "System.Devices.HardwareIds" };
+    internal const string ModelNumberProperty = "System.Devices.ModelNumber";
+    internal const string BluetoothVendorProperty = "System.DeviceInterface.Bluetooth.VendorId";
+    internal const string BluetoothVendorSourceProperty = "System.DeviceInterface.Bluetooth.VendorIdSource";
+    internal const string BluetoothProductProperty = "System.DeviceInterface.Bluetooth.ProductId";
+    private static readonly string[] IdentityProperties = { "System.Devices.HardwareIds", ModelNumberProperty,
+        BluetoothVendorProperty, BluetoothVendorSourceProperty, BluetoothProductProperty };
+    private static readonly string[] Properties = new[] { ConnectedProperty, ContainerProperty, AepContainerProperty }.Concat(IdentityProperties).ToArray();
     private readonly Dispatcher _dispatcher;
     private readonly List<DeviceWatcher> _watchers = new();
     private readonly HashSet<DeviceWatcher> _ready = new();
@@ -96,6 +102,7 @@ public sealed class AppleDeviceService : IDisposable
         try
         {
             // Windows sometimes publishes the connection before its PnP profile metadata.
+            AppleDeviceConnection? fallback = null;
             foreach (var delay in new[] { 0, 300, 900 })
             {
                 if (delay != 0) await Task.Delay(delay);
@@ -103,9 +110,15 @@ public sealed class AppleDeviceService : IDisposable
                 var identity = await ReadIdentityAsync(entry.Info, entry.Wired);
                 if (_disposed || !entry.IsConnected || entry.Revision != revision) return;
                 if (identity is null) continue;
+                fallback = identity;
+                // Allow profile metadata to catch up before showing a generic
+                // AirPods label. A confirmed exact model can be shown immediately.
+                if (identity.ModelName is null && identity.Kind is AppleDeviceKind.AirPods or AppleDeviceKind.AirPodsPro or AppleDeviceKind.AirPodsMax) continue;
                 if (_connections.TryAnnounce(entry.Group, entry.Info.Id)) Connected?.Invoke(this, identity);
                 return;
             }
+            if (fallback is not null && !_disposed && entry.IsConnected && entry.Revision == revision
+                && _connections.TryAnnounce(entry.Group, entry.Info.Id)) Connected?.Invoke(this, fallback);
         }
         catch (Exception ex) { Log.Error("Read Apple device identity", ex); }
     }
@@ -120,25 +133,54 @@ public sealed class AppleDeviceService : IDisposable
     internal static async Task<AppleDeviceConnection?> ReadIdentityAsync(DeviceInformation info, bool wired)
     {
         var hardwareIds = HardwareIds(info).ToList();
+        var modelNumbers = ModelNumbers(info).ToList();
         var name = info.Name;
         if (Container(info) is { } container)
         {
-            var devices = await DeviceInformation.FindAllAsync($"System.Devices.ContainerId:=\"{container:B}\"", new[] { "System.Devices.HardwareIds" }, DeviceInformationKind.Device);
-            foreach (var device in devices)
+            // Some drivers publish product metadata on the Bluetooth interface,
+            // others on the underlying PnP device. Read both in the same container.
+            var kinds = wired ? new[] { DeviceInformationKind.Device } : new[] { DeviceInformationKind.Device, DeviceInformationKind.DeviceInterface };
+            foreach (var kind in kinds)
             {
-                hardwareIds.AddRange(HardwareIds(device));
-                if (wired && (device.Name.Contains("iPhone", StringComparison.OrdinalIgnoreCase) || device.Name.Contains("iPad", StringComparison.OrdinalIgnoreCase))) name = device.Name;
+                try
+                {
+                    var devices = await DeviceInformation.FindAllAsync($"System.Devices.ContainerId:=\"{container:B}\"", IdentityProperties, kind);
+                    foreach (var device in devices)
+                    {
+                        hardwareIds.AddRange(HardwareIds(device));
+                        modelNumbers.AddRange(ModelNumbers(device));
+                        if (wired && (device.Name.Contains("iPhone", StringComparison.OrdinalIgnoreCase) || device.Name.Contains("iPad", StringComparison.OrdinalIgnoreCase))) name = device.Name;
+                    }
+                }
+                catch (Exception ex) { Log.Error("Read Apple device profile metadata", ex); }
             }
         }
-        return AppleDeviceIdentity.Recognize(Container(info)?.ToString("B") ?? info.Id, name, hardwareIds, wired);
+        return AppleDeviceIdentity.Recognize(Container(info)?.ToString("B") ?? info.Id, name, hardwareIds, wired, modelNumbers);
+    }
+
+    private static IEnumerable<string> ModelNumbers(DeviceInformation info)
+    {
+        if (info.Properties.TryGetValue(ModelNumberProperty, out var value) && value is string number) yield return number;
     }
 
     private static IEnumerable<string> HardwareIds(DeviceInformation info)
     {
         yield return info.Id;
+        if (BluetoothHardwareId(info.Properties) is { } bluetoothId) yield return bluetoothId;
         if (!info.Properties.TryGetValue("System.Devices.HardwareIds", out var value)) yield break;
         if (value is string[] ids) foreach (var id in ids) yield return id;
         else if (value is string id) yield return id;
+    }
+
+    internal static string? BluetoothHardwareId(IReadOnlyDictionary<string, object> properties)
+    {
+        // Bluetooth SIG and USB vendor numbers have separate namespaces. Never
+        // accept a local adapter manufacturer or a vendor without its source.
+        if (!properties.TryGetValue(BluetoothVendorSourceProperty, out var sourceValue) || sourceValue is not byte source
+            || !properties.TryGetValue(BluetoothVendorProperty, out var vendorValue) || vendorValue is not ushort vendor
+            || !properties.TryGetValue(BluetoothProductProperty, out var productValue) || productValue is not ushort product
+            || !(source == 1 && vendor == 0x004C || source == 2 && vendor == 0x05AC)) return null;
+        return $@"BTHENUM\VID&000{source:X1}{vendor:X4}_PID&{product:X4}";
     }
 
     public void Dispose()

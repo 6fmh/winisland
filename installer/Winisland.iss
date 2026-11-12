@@ -5,7 +5,7 @@
   #define InstallerOutputDirectory "..\dist\installer"
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.5.0"
+  #define AppVersion "0.6.0"
 #endif
 #ifndef AppRuntime
   #define AppRuntime "win-x64"
@@ -70,7 +70,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\CDP"; ValueType: 
 Filename: "{app}\Winisland.exe"; Description: "Launch Winisland"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "{app}\Winisland.exe"; Parameters: "--configure-startup false"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RemoveSigninTask"
+Filename: "{app}\Winisland.exe"; Parameters: "--configure-startup remove-owned"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RemoveSigninTask"
 Filename: "{app}\Winisland.exe"; Parameters: "--unregister-browser-host"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "UnregisterBrowserHost"
 
 [Code]

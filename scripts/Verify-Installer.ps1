@@ -193,6 +193,33 @@ try {
         } finally { if ($registration) { $registration.Dispose() } }
         if ($scenario -eq 'enabled') {
             Assert-SigninTask $application
+            # Exercise the exact uninstall command against mixed ownership.
+            # The disposable runner owns all registrations created here.
+            $foreignApplication = Join-Path $outputDirectory 'later-portable/Winisland.exe'
+            $foreignRun = '"' + $foreignApplication + '" --background'
+            $startup.SetValue('Winisland', $foreignRun)
+            Assert-Installer ((Invoke-InstallerProcess $application '--configure-startup remove-owned') -eq 0) 'Owned startup removal completes for a mixed task and Run registration'
+            $settingsPath = Join-Path $env:WINISLAND_DATA_DIR 'settings.json'
+            $removalSettings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+            Assert-Installer ($null -eq (Get-SigninTask) -and $startup.GetValue('Winisland') -eq $foreignRun -and $removalSettings.StartWithWindows) 'Uninstall command removes its own task and preserves a later portable Run registration and preference'
+            Assert-Installer ((Invoke-InstallerProcess $application '--configure-startup preserve') -eq 0) 'Restores owned startup after the mixed Run scenario'
+            $ownTask = Get-SigninTask
+            try { [xml]$foreignTaskXml = [string]$ownTask.Xml }
+            finally { [Runtime.InteropServices.Marshal]::FinalReleaseComObject($ownTask) | Out-Null }
+            $foreignTaskXml.Task.Actions.Exec.Command = $foreignApplication
+            $createdTask = $taskFolder.RegisterTask($taskName, $foreignTaskXml.OuterXml, 6, $taskName.Substring('Winisland-'.Length), $null, 3, $null)
+            [Runtime.InteropServices.Marshal]::FinalReleaseComObject($createdTask) | Out-Null
+            $startup.SetValue('Winisland', '"' + $application + '" --background')
+            Assert-Installer ((Invoke-InstallerProcess $application '--configure-startup remove-owned') -eq 0) 'Owned startup removal completes for a foreign task and owned Run registration'
+            $remainingTask = Get-SigninTask
+            try {
+                [xml]$remainingTaskXml = [string]$remainingTask.Xml
+                $removalSettings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+                Assert-Installer ($remainingTaskXml.Task.Actions.Exec.Command -eq $foreignApplication -and
+                    !($startup.GetValueNames() -contains 'Winisland') -and $removalSettings.StartWithWindows) 'Uninstall command preserves a later portable task and preference while removing its own Run entry'
+            } finally { if ($remainingTask) { [Runtime.InteropServices.Marshal]::FinalReleaseComObject($remainingTask) | Out-Null } }
+            Assert-Installer ((Invoke-InstallerProcess $application '--configure-startup preserve') -eq 0) 'Restores owned startup after the foreign task scenario'
+            Assert-SigninTask $application
             $settingsPath = Join-Path $env:WINISLAND_DATA_DIR 'settings.json'
             $saved = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
             $saved.NotchWidth = 230
@@ -240,7 +267,7 @@ try {
             Copy-Item -LiteralPath $application -Destination $helper
             $planPath = Join-Path $cache 'update-plan.json'
             $plan = @{ Package = @{ InstallerPath = $stagedInstaller; Sha256 = (Get-FileHash -LiteralPath $stagedInstaller -Algorithm SHA256).Hash.ToLowerInvariant(); Version = [string]$version };
-                ParentId = [int]::MaxValue; ParentStartedUtcTicks = 0; ApplicationPath = $application; InstallDirectory = $activeInstallDirectory }
+                ParentId = [int]::MaxValue; ParentStartedUtcTicks = [DateTime]::UtcNow.Ticks; ApplicationPath = $application; InstallDirectory = $activeInstallDirectory }
             [IO.File]::WriteAllText($planPath, ($plan | ConvertTo-Json -Depth 5))
             $exitCode = Invoke-InstallerProcess $helper ('--apply-update "{0}"' -f $planPath) -FileBackedResult
             $outcomePath = Join-Path $env:WINISLAND_DATA_DIR 'update-result.json'

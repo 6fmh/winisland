@@ -6,6 +6,7 @@ using System.IO.Pipes;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -24,6 +25,7 @@ internal static class PlayerVolumeVerification
         await VerifyHostAsync(assert);
         await VerifyServiceAsync(dispatcher, assert);
         await VerifyBrowserAsync(assert);
+        await VerifyBrowserStateNotificationsAsync(assert);
         await VerifyUnusedAccessibilityAsync(assert);
         await VerifyAccessibilityAsync(assert);
     }
@@ -219,6 +221,93 @@ internal static class PlayerVolumeVerification
 
         Task SendState(string id, string title, double volume, bool playing = true, string artist = "Fixture") => NativeMessagingProtocol.WriteAsync(connection,
             JsonSerializer.Serialize(new { type = "state", id, title, artist, volume, muted = false, playing, duration = 180, position = 12 }), timeout.Token);
+    }
+
+    private static async Task VerifyBrowserStateNotificationsAsync(Action<bool, string> assert)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        using var bridge = new BrowserVolumeBridge();
+        using var connection = new NamedPipeClientStream(".", BrowserVolumeBridge.PipeName, PipeDirection.InOut,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        var changed = 0;
+        var marker = 10.0;
+        var barrier = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var barrierMedia = new MediaSnapshot { HasSession = true, Source = "chrome", Title = "State barrier", IsPlaying = true };
+        bridge.Changed += (_, _) =>
+        {
+            Interlocked.Increment(ref changed);
+            var current = bridge.ReadAsync(barrierMedia, CancellationToken.None).GetAwaiter().GetResult();
+            if (current.Available && current.Volume == Volatile.Read(ref marker))
+                Volatile.Read(ref barrier).TrySetResult(true);
+        };
+        await connection.ConnectAsync(timeout.Token);
+        await NativeMessagingProtocol.WriteAsync(connection, "{\"type\":\"hello\",\"browser\":\"chrome\"}", timeout.Token);
+        await NativeMessagingProtocol.ReadAsync(connection, timeout.Token);
+        await State("Matching title", "Fixture", 61.2, false, true);
+        await Barrier();
+        await barrier.Task.WaitAsync(timeout.Token);
+        var media = new MediaSnapshot { HasSession = true, Source = "chrome", Title = "Matching title", IsPlaying = true };
+
+        // Age only this private fixture's target, avoiding a 31-second sleep.
+        // The real protocol heartbeat must refresh it before expiry is tested.
+        var player = Target();
+        var seenProperty = player.GetType().GetProperty("Seen")!;
+        seenProperty.SetValue(player, Environment.TickCount64 - 29000);
+        var duplicateNotifications = await Observe(() => State("(3) Matching title - YouTube", " FIXTURE ", 61.2, false, true));
+        assert(duplicateNotifications == 1,
+            "Normalized-equivalent browser heartbeats do not publish a UI change (the distinct barrier alone notifies)");
+        player = Target();
+        seenProperty.SetValue(player, (long)seenProperty.GetValue(player)! - 2000);
+        var alive = await bridge.ReadAsync(media, timeout.Token);
+        assert(alive.Available && alive.Volume == 61.2,
+            "An unchanged browser heartbeat refreshes the real 30-second target lifetime");
+
+        foreach (var state in new[]
+        {
+            (Title: "Matching title", Artist: "Fixture", Volume: 43.25, Muted: false, Playing: true, Field: "volume"),
+            (Title: "Matching title", Artist: "Fixture", Volume: 43.25, Muted: true, Playing: true, Field: "mute"),
+            (Title: "Matching title", Artist: "Fixture", Volume: 43.25, Muted: true, Playing: false, Field: "playback"),
+            (Title: "Matching title", Artist: "Another artist", Volume: 43.25, Muted: true, Playing: false, Field: "artist"),
+            (Title: "Another title", Artist: "Another artist", Volume: 43.25, Muted: true, Playing: false, Field: "title")
+        })
+        {
+            var count = await Observe(() => State(state.Title, state.Artist, state.Volume, state.Muted, state.Playing));
+            media = media with { Title = state.Title, Artist = state.Artist, IsPlaying = state.Playing };
+            var actual = await bridge.ReadAsync(media, timeout.Token);
+            assert(count == 2 && actual.Available && actual.Volume == state.Volume && actual.Muted == state.Muted,
+                $"A real browser {state.Field} change publishes once and preserves its readback");
+        }
+        player = Target();
+        seenProperty.SetValue(player, Environment.TickCount64 - 31000);
+        assert(!(await bridge.ReadAsync(media, timeout.Token)).Available,
+            "A browser target without heartbeats still expires after the real 30-second cutoff");
+        connection.Dispose();
+        await WaitUntil(() => !bridge.IsConnected, timeout.Token);
+
+        Task State(string title, string artist, double volume, bool muted, bool playing) =>
+            NativeMessagingProtocol.WriteAsync(connection, JsonSerializer.Serialize(new
+            { type = "state", id = "target:0:1", title, artist, volume, muted, playing }), timeout.Token);
+        Task Barrier() => NativeMessagingProtocol.WriteAsync(connection, JsonSerializer.Serialize(new
+            { type = "state", id = "barrier:0:1", title = "State barrier", volume = marker, muted = false, playing = true }), timeout.Token);
+        async Task<int> Observe(Func<Task> send)
+        {
+            Volatile.Write(ref marker, marker + 1);
+            var next = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Volatile.Write(ref barrier, next);
+            Interlocked.Exchange(ref changed, 0);
+            await send();
+            await Barrier();
+            await next.Task.WaitAsync(timeout.Token);
+            return Volatile.Read(ref changed);
+        }
+        object Target()
+        {
+            var values = (System.Collections.IDictionary)typeof(BrowserVolumeBridge)
+                .GetField("_players", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(bridge)!;
+            foreach (var value in values.Values)
+                if ((string)value!.GetType().GetProperty("Id")!.GetValue(value)! == "target:0:1") return value;
+            throw new InvalidOperationException("The private browser target fixture is missing.");
+        }
     }
 
     private static async Task VerifyUnusedAccessibilityAsync(Action<bool, string> assert)

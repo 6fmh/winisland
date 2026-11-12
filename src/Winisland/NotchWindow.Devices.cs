@@ -4,17 +4,20 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Automation.Peers;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
+using Winisland.Controls;
 using Winisland.Services;
 
 namespace Winisland;
 
 public partial class NotchWindow
 {
-    internal const double AppleConnectionMinimumWidth = 380;
-    internal const double AppleConnectionContentHeight = 84;
+    internal const double AppleConnectionMinimumWidth = 420;
+    private const double AppleConnectionRowHeight = 64;
+    internal const double AppleConnectionContentHeight = AppleConnectionRowHeight + 2 * PopupFooterPadding;
     private AppleDeviceService? _appleDevices;
     private AppleDeviceConnection? _deviceConnection;
     private readonly Queue<AppleDeviceConnection> _deviceQueue = new();
@@ -24,6 +27,30 @@ public partial class NotchWindow
     private void InitializeAppleDevices()
     {
         _deviceTimer.Tick += (_, _) => DismissDeviceConnection();
+        DeviceConnection.MouseEnter += (_, _) => _deviceTimer.Stop();
+        DeviceConnection.MouseLeave += (_, _) => ResumeDeviceTimer();
+        DeviceHeaderStatus.MouseEnter += (_, _) => _deviceTimer.Stop();
+        DeviceHeaderStatus.MouseLeave += (_, _) => ResumeDeviceTimer();
+        DeviceConnection.IsKeyboardFocusWithinChanged += (_, _) => ResumeDeviceTimer();
+        PreviewKeyDown += (_, args) =>
+        {
+            if (args.Handled || args.Key != Key.Escape || _activeNotification is not null || _deviceConnection is null) return;
+            DismissDeviceConnection(); args.Handled = true;
+        };
+    }
+
+    private void ResumeDeviceTimer()
+    {
+        _deviceTimer.Stop();
+        if (_deviceConnection is not null && _activeNotification is null && !DeviceConnection.IsMouseOver
+            && !DeviceConnection.IsKeyboardFocusWithin && !DeviceHeaderStatus.IsMouseOver
+            && (DeviceConnection.IsVisible || DeviceHeaderStatus.IsVisible)) _deviceTimer.Start();
+    }
+
+    private void OnDeviceDismiss(object sender, RoutedEventArgs args)
+    {
+        args.Handled = true;
+        DismissDeviceConnection();
     }
 
     private void StartAppleDevices()
@@ -36,44 +63,70 @@ public partial class NotchWindow
     private void OnAppleDeviceConnected(object? sender, AppleDeviceConnection connection)
     {
         if (_fullscreenHidden) return;
-        if (_deviceConnection?.Id == connection.Id || _deviceQueue.Any(item => item.Id == connection.Id)) return;
+        if (_deviceConnection?.Id == connection.Id)
+        {
+            _deviceConnection = connection;
+            PresentDeviceConnection(connection);
+            ResumeDeviceTimer();
+            return;
+        }
+        if (_deviceQueue.Any(item => item.Id == connection.Id))
+        {
+            var pending = _deviceQueue.Select(item => item.Id == connection.Id ? connection : item).ToArray();
+            _deviceQueue.Clear();
+            foreach (var item in pending) _deviceQueue.Enqueue(item);
+            return;
+        }
         if (_deviceConnection is not null)
         {
             if (_deviceQueue.Count < 6) _deviceQueue.Enqueue(connection);
             return;
         }
         _deviceConnection = connection;
-        DeviceName.Text = connection.Name;
-        DeviceStatus.Text = connection.Wired ? "Connected via USB" : "Connected";
-        DeviceHeaderLabel.Text = connection.Wired ? "USB connected" : "Connected";
-        DeviceIllustration.Kind = DeviceHeaderIllustration.Kind = connection.Kind;
-        var announcement = connection.Wired ? $"{connection.Name} connected via USB" : $"{connection.Name} connected";
-        AutomationProperties.SetName(DeviceConnection, announcement);
-        AutomationProperties.SetName(DeviceHeaderStatus, announcement);
+        PresentDeviceConnection(connection);
         _hudTimer.Stop(); _showingHud = false;
         Hud.Visibility = Visibility.Collapsed;
         UpdateDevicePresentation(true);
-        var peer = UIElementAutomationPeer.FromElement(_expanded ? DeviceHeaderStatus : DeviceConnection);
+        FrameworkElement element = _expanded && !UsesIslandPlayer ? DeviceHeaderStatus : DeviceConnection;
+        var peer = UIElementAutomationPeer.FromElement(element) ?? UIElementAutomationPeer.CreatePeerForElement(element);
         peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
-        _deviceTimer.Stop(); _deviceTimer.Start();
+        ResumeDeviceTimer();
+    }
+
+    private void PresentDeviceConnection(AppleDeviceConnection connection)
+    {
+        DeviceName.Text = connection.Name;
+        DeviceStatus.Text = DeviceHeaderLabel.Text = connection.ConnectionStatus;
+        DeviceIllustration.Kind = DeviceHeaderIllustration.Kind = connection.Kind;
+        var announcement = connection.Announcement;
+        AutomationProperties.SetName(DeviceConnection, announcement);
+        AutomationProperties.SetName(DeviceHeaderStatus, announcement);
     }
 
     private void UpdateDevicePresentation(bool entering = false)
     {
         var active = _deviceConnection is not null;
-        DeviceHeaderStatus.Visibility = active && _expanded ? Visibility.Visible : Visibility.Collapsed;
+        var footer = active && _expanded && UsesIslandPlayer && _activeNotification is null;
+        DeviceHeaderStatus.Visibility = active && _expanded && !footer && _activeNotification is null ? Visibility.Visible : Visibility.Collapsed;
         BatteryStatus.Visibility = _lastBattery is { HasBattery: true } && !(active && _expanded) ? Visibility.Visible : Visibility.Collapsed;
-        if (!active || _expanded || _activeNotification is not null)
+        if (!active || _expanded && !footer || _activeNotification is not null)
         {
             ++_deviceTransitionVersion;
             ResetDevicePresentation();
             DeviceConnection.Visibility = Visibility.Collapsed;
+            ResumeDeviceTimer();
             return;
         }
         CompactActivity.Visibility = Hud.Visibility = Visibility.Collapsed;
-        DeviceConnection.Margin = new Thickness(30, _settings.Current.NotchHeight + 8, 30, 20);
+        SetMinimalActivity(false);
+        var inset = IsDynamicIsland ? DynamicIslandMetrics.ContentInset : 30;
+        var padding = footer ? PopupFooterPadding : ClosedPopupPadding;
+        DeviceConnection.Margin = new Thickness(inset, (footer ? BaseExpandedPanelHeight : 0) + padding, inset, padding);
+        DeviceConnection.Height = AppleConnectionRowHeight;
+        if (footer) UpdateExpandedLayout();
         var wasHidden = DeviceConnection.Visibility != Visibility.Visible;
         DeviceConnection.Visibility = Visibility.Visible;
+        if (wasHidden) ResumeDeviceTimer();
         if (entering || wasHidden)
         {
             ++_deviceTransitionVersion;
@@ -107,12 +160,14 @@ public partial class NotchWindow
                 DeviceConnectionOffset.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(offset, 0, duration) { EasingFunction = ease, FillBehavior = FillBehavior.Stop });
             }
         }
-        AnimateSize(Math.Max(AppleConnectionMinimumWidth, _settings.Current.NotchWidth + 64), _settings.Current.NotchHeight + AppleConnectionContentHeight);
+        AnimateSize(footer ? ExpandedPanelWidth : IsDynamicIsland ? DynamicIslandMetrics.ExpandedWidth : Math.Max(AppleConnectionMinimumWidth, _settings.Current.NotchWidth + 64),
+            footer ? ExpandedPanelHeight : AppleConnectionRowHeight + 2 * ClosedPopupPadding);
         UpdateVisualizer();
     }
 
     private void DismissDeviceConnection(bool immediate = false)
     {
+        var restoreFocus = _expanded && !_fullscreenHidden && IsActive && DeviceConnection.IsKeyboardFocusWithin;
         _deviceTimer.Stop();
         _deviceConnection = null;
         if (immediate) _deviceQueue.Clear();
@@ -143,6 +198,14 @@ public partial class NotchWindow
         }
         if (!immediate && _deviceQueue.TryDequeue(out var next)) OnAppleDeviceConnected(this, next);
         else if (!_expanded) UpdateCompact();
+        else if (UsesIslandPlayer)
+        {
+            UpdateExpandedLayout();
+            AnimateSize(ExpandedPanelWidth, ExpandedPanelHeight);
+            UpdateVisualizer();
+        }
+        if (restoreFocus && _expanded && !_fullscreenHidden && IsActive)
+            (_deviceConnection is not null && DeviceConnection.IsVisible ? DeviceDismissButton : SelectedTabControl).Focus();
     }
 
     private void FinishDeviceAnimations()

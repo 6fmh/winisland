@@ -39,6 +39,7 @@ function removeTabPlayers(tabId) {
 function connect() {
   if (nativePort) return;
   clearTimeout(reconnectTimer);
+  reconnectTimer = 0;
   prunePlayers();
   try {
     const port = chrome.runtime.connectNative(HOST);
@@ -57,7 +58,6 @@ function connect() {
     sendNative({ type: "hello", browser: browserName() });
     for (const state of players.values()) sendNative({ type: "state", ...state });
     connectionStatus = "Connecting locally to Winisland…";
-    retryDelay = 1000;
     chrome.action.setBadgeBackgroundColor({ color: "#3A8DFF" });
     chrome.action.setBadgeText({ text: "" });
   } catch {
@@ -100,7 +100,7 @@ function clipText(value, maximum) {
 }
 
 async function handleCommand(message) {
-  if (message?.type === "ready" && message.protocol === 1) { nativeReady = true; connectionStatus = "Connected locally to Winisland."; return; }
+  if (message?.type === "ready" && message.protocol === 1) { nativeReady = true; retryDelay = 1000; connectionStatus = "Connected locally to Winisland."; return; }
   if (!message || message.type !== "command" || typeof message.requestId !== "string" || !/^[a-f0-9]{32}$/.test(message.requestId)) return;
   prunePlayers();
   const target = players.get(message.id);
@@ -148,7 +148,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       if (players.size < 128 || players.has(state.id)) { players.set(state.id, state); sendNative({ type: "state", ...state }); }
     }
     for (const id of players.keys()) if (id.startsWith(framePrefix) && !known.has(id)) { players.delete(id); sendNative({ type: "remove", id }); }
-    if (!nativePort) connect();
+    if (!nativePort && !reconnectTimer) connect();
   }
 });
 

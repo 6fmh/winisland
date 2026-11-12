@@ -15,20 +15,22 @@ public partial class NotchWindow
 {
     private bool _changingTab;
     private int _tabTransitionVersion;
-    private double ExpandedPanelHeight => BaseExpandedPanelHeight + (_activeNotification is null ? 0 : NotificationFooterHeight);
-    private double BaseExpandedPanelHeight => _selectedTab switch
+    private double ExpandedPanelHeight => BaseExpandedPanelHeight + (_activeNotification is not null ? NotificationFooterHeight
+        : UsesIslandPlayer && _deviceConnection is not null ? AppleConnectionContentHeight : 0);
+    private double BaseExpandedPanelHeight => _islandMenuOpen ? DynamicIslandMetrics.MenuHeight : UsesIslandPlayer ? DynamicIslandMetrics.ExpandedHeight : (_selectedTab switch
     {
         "controls" => NotchMetrics.ControlCenterExpandedHeight,
         "calendar" or "tools" => NotchMetrics.OrganizerExpandedHeight,
+        "updates" => _updatePanelHeight,
         _ => NotchMetrics.ExpandedHeight
-    };
-    private Control SelectedTabControl => _selectedTab switch
+    }) + (IsDynamicIsland ? IslandFeatureTopInset : 0);
+    private Control SelectedTabControl => _islandMenuOpen ? (Control)IslandMenuPanel.FindName("BackButton") : UsesIslandPlayer ? (Control)DynamicPlayer.FindName("MenuButton") : _selectedTab switch
     {
         "files" => FilesTab, "focus" => FocusTab, "calendar" => CalendarTab, "tools" => ToolsTab,
         "controls" => ControlCenterTab, "updates" => UpdateTab, _ => MusicTab
     };
 
-    private FrameworkElement PanelFor(string tab) => tab switch
+    private FrameworkElement PanelFor(string tab) => _islandMenuOpen ? IslandMenuPanel : tab == "music" && IsDynamicIsland ? DynamicPlayer : tab switch
     {
         "files" => FilesPanel, "focus" => FocusPanel, "calendar" or "tools" => OrganizerHost,
         "controls" => ControlCenterHost, "updates" => UpdatePanel, _ => MusicPanel
@@ -38,6 +40,7 @@ public partial class NotchWindow
     {
         if (_changingTab || MusicPanel is null || OrganizerHost is null) return;
         if (tab is not ("music" or "files" or "focus" or "calendar" or "tools" or "controls" or "updates")) tab = "music";
+        if (_islandMenuOpen) ResetIslandMenu();
         _changingTab = true;
         try
         {
@@ -61,8 +64,8 @@ public partial class NotchWindow
             if (tab == "calendar") Organizer.ShowCalendar();
             else if (tab == "tools") Organizer.ShowTools();
 
-            ExpandedContent.Height = BaseExpandedPanelHeight - NotchMetrics.ContentBottomInset;
-            if (_expanded) AnimateSize(NotchMetrics.ExpandedWidth, ExpandedPanelHeight);
+            UpdateExpandedLayout();
+            if (_expanded) AnimateSize(ExpandedPanelWidth, ExpandedPanelHeight);
             if (_activeNotification is not null) UpdateNotificationPresentation();
             if (!changed || !_expanded || _settings.Current.ReducedMotion || !SystemParameters.ClientAreaAnimation)
             {
@@ -71,7 +74,7 @@ public partial class NotchWindow
             }
             var incoming = PanelFor(tab);
             var version = ++_tabTransitionVersion;
-            foreach (var panel in new FrameworkElement[] { MusicPanel, FilesPanel, FocusPanel, OrganizerHost, ControlCenterHost, UpdatePanel })
+            foreach (var panel in new FrameworkElement[] { MusicPanel, DynamicPlayer, IslandMenuPanel, FilesPanel, FocusPanel, OrganizerHost, ControlCenterHost, UpdatePanel })
             {
                 if (ReferenceEquals(panel, incoming))
                 {
@@ -112,7 +115,7 @@ public partial class NotchWindow
     {
         ++_tabTransitionVersion;
         var selected = PanelFor(_selectedTab);
-        foreach (var panel in new FrameworkElement[] { MusicPanel, FilesPanel, FocusPanel, OrganizerHost, ControlCenterHost, UpdatePanel })
+        foreach (var panel in new FrameworkElement[] { MusicPanel, DynamicPlayer, IslandMenuPanel, FilesPanel, FocusPanel, OrganizerHost, ControlCenterHost, UpdatePanel })
         {
             panel.BeginAnimation(OpacityProperty, null);
             panel.Opacity = 1;
@@ -168,7 +171,10 @@ public partial class NotchWindow
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Handled) return;
-        if (e.Key == Key.Escape) { Collapse(); e.Handled = true; return; }
+        if (e.Key == Key.Escape) { if (_islandMenuOpen) CloseIslandMenu(); else Collapse(); e.Handled = true; return; }
+        if (IsDynamicIsland && (e.Key == Key.Apps || e.Key == Key.F10 && Keyboard.Modifiers == ModifierKeys.Shift)
+            && CanOpenIslandMenu(e.OriginalSource as DependencyObject))
+        { OpenIslandMenu(); e.Handled = true; return; }
         if (!_pinned || Keyboard.Modifiers != ModifierKeys.Control) return;
         var tab = e.Key switch
         {

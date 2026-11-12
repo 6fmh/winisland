@@ -63,6 +63,8 @@ public static class CalendarInterchange
                 if (current is null) continue;
                 try
                 {
+                    if (current.TryGetValue("STATUS", out var status) && status.Value.Equals("CANCELLED", StringComparison.OrdinalIgnoreCase))
+                        throw new ArgumentException("Cancelled calendar events are not active events.");
                     if (current.ContainsKey("RRULE") || current.ContainsKey("RDATE") || current.ContainsKey("EXRULE") || current.ContainsKey("RECURRENCE-ID"))
                         throw new ArgumentException("Recurring events require an account calendar.");
                     if (!current.TryGetValue("DTSTART", out var startProperty)) throw new ArgumentException("Event has no start date.");
@@ -99,7 +101,7 @@ public static class CalendarInterchange
             if (line.StartsWith("BEGIN:", StringComparison.OrdinalIgnoreCase)) { nested++; continue; }
             if (line.StartsWith("END:", StringComparison.OrdinalIgnoreCase) && nested > 0) { nested--; continue; }
             if (nested > 0) continue;
-            var colon = line.IndexOf(':');
+            var colon = PropertyDelimiter(line);
             if (colon <= 0) continue;
             var header = line[..colon];
             var semicolon = header.IndexOf(';');
@@ -109,6 +111,19 @@ public static class CalendarInterchange
             current.TryAdd(name, new Property(line[(colon + 1)..], parameters));
         }
         return new CalendarImport(entries, skipped);
+    }
+
+    private static int PropertyDelimiter(string line)
+    {
+        // RFC 5545 parameter values may quote URIs containing colons. The
+        // content begins at the first colon outside those quoted parameters.
+        var quoted = false;
+        for (var i = 0; i < line.Length; i++)
+        {
+            if (line[i] == '"') quoted = !quoted;
+            else if (line[i] == ':' && !quoted) return i;
+        }
+        return -1;
     }
 
     public static string Export(IEnumerable<CalendarEntry> entries)
@@ -121,7 +136,7 @@ public static class CalendarInterchange
             lines.Add("DTSTAMP:" + DateTimeOffset.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture));
             if (entry.AllDay)
             {
-                var day = DateOnly.FromDateTime(entry.Start.LocalDateTime);
+                var day = DateOnly.FromDateTime(entry.Start.DateTime);
                 lines.Add("DTSTART;VALUE=DATE:" + day.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
                 lines.Add("DTEND;VALUE=DATE:" + day.AddDays(Math.Max(1, entry.DurationMinutes / 1440)).ToString("yyyyMMdd", CultureInfo.InvariantCulture));
             }

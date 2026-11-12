@@ -2,7 +2,8 @@ param(
     [switch]$SelfContained,
     [switch]$Verify,
     [ValidateSet('win-x64', 'win-arm64')][string]$Runtime = 'win-x64',
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [switch]$PrivateBuild
 )
 $ErrorActionPreference = 'Stop'
 if ($Verify) {
@@ -25,15 +26,18 @@ if (Test-Path -LiteralPath $localDotnet) {
     $buildTool = $localDotnet
 }
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
-$publishDirectory = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } elseif ($Verify) { Join-Path $projectRoot "artifacts/verification/candidate/$Runtime" } else { Join-Path $projectRoot "dist/$Runtime" }
+$candidateRuntime = if ($PrivateBuild) { "private/$Runtime" } else { $Runtime }
+$publishDirectory = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } elseif ($Verify) { Join-Path $projectRoot "artifacts/verification/candidate/$candidateRuntime" } else { Join-Path $projectRoot "dist/$candidateRuntime" }
 # Single-file self-contained builds use composite ReadyToRun dependencies;
 # portable builds use standalone images. Sharing the SDK's R2R cache can leave
 # portable dependencies pointing at an absent self-contained composite image.
 $publishFlavor = if ($SelfContained) { 'self-contained' } else { 'portable' }
+if ($PrivateBuild) { $publishFlavor += '-private' }
 $intermediateDirectory = (Join-Path $projectRoot "src/Winisland/obj/publish/$publishFlavor/$Runtime/")
 $buildDirectory = (Join-Path $projectRoot "src/Winisland/bin/publish/$publishFlavor/$Runtime/")
 $publishArguments = @('publish', (Join-Path $projectRoot 'src/Winisland/Winisland.csproj'),
     '-c', 'Release', '-r', $Runtime, '--self-contained', $SelfContained.IsPresent.ToString().ToLowerInvariant(),
+    "-p:WinislandPrivateBuild=$($PrivateBuild.IsPresent.ToString().ToLowerInvariant())",
     '-p:PublishSingleFile=true', '-p:EnableCompressionInSingleFile=false', '-p:PublishReadyToRun=true', '-p:IncludeNativeLibrariesForSelfExtract=true',
     "-p:IntermediateOutputPath=$intermediateDirectory", "-p:OutputPath=$buildDirectory",
     '-p:DebugType=None', '-p:DebugSymbols=false', '-o', $publishDirectory, '--nologo')

@@ -51,9 +51,14 @@ public partial class NotchWindow : Window
     private bool _updatingVolume, _updatingSeek, _seeking, _expanded, _pinned, _showingHud, _fullscreenHidden;
     private bool _dialogOpen;
     private bool _allowClose;
+    private bool _viewInitialized;
     private bool _pointerInside, _dragActive;
     private int _pulseCount;
     private bool _changingMediaSource;
+    private long _elapsedFeedbackSecond = long.MinValue;
+    private bool _elapsedFeedbackHasTime;
+    private string? _seekTooltipElapsed, _seekTooltipDuration;
+    private bool? _seekTooltipEnabled;
     private long _lastPlayerFailure;
     private Point _dragStart;
     private double _targetWidth = -1, _targetHeight = -1;
@@ -86,12 +91,14 @@ public partial class NotchWindow : Window
         _ownsPlayerVolume = playerVolume is null;
         _playerVolume = playerVolume ?? new PlayerVolumeService(Dispatcher, deferInitialization: true);
         InitializeComponent();
+        _viewInitialized = true;
         InitializeNotifications();
         PreviewKeyDown += (_, args) => OnNotificationKeyDown(args);
         InitializeUpdates();
         InitializeFocus();
         InitializeAppleDevices();
         Surface.ContourChanged += (_, _) => UpdateContour();
+        InitializeDynamicIsland();
         UpdateCameraSpace();
         SyncMotionPreference();
         SystemParameters.StaticPropertyChanged += OnSystemParametersChanged;
@@ -181,6 +188,7 @@ public partial class NotchWindow : Window
     {
         if (!_settings.Current.ShowNotifications) DismissNotification(true);
         SyncMotionPreference();
+        ApplyNotchAppearance();
         UpdateCameraSpace();
         SyncFocusSettings();
         NativeMethods.PositionOverlay(this, _settings.Current.MonitorDevice);
@@ -193,11 +201,22 @@ public partial class NotchWindow : Window
             UpdateArtwork();
         }
         if (!_expanded) UpdateCompact();
-        else UpdateDevicePresentation();
+        else
+        {
+            UpdateExpandedLayout();
+            FinishTabTransitions();
+            AnimateSize(ExpandedPanelWidth, ExpandedPanelHeight);
+            UpdateDevicePresentation();
+            if (_activeNotification is not null) UpdateNotificationPresentation();
+        }
         UpdateVisualizer();
     }
     private bool MotionEnabled => !_settings.Current.ReducedMotion && SystemParameters.ClientAreaAnimation;
-    private void SyncMotionPreference() => Application.Current.Resources[InteractionMotion.PreferenceKey] = MotionEnabled;
+    private void SyncMotionPreference()
+    {
+        Application.Current.Resources[InteractionMotion.PreferenceKey] = MotionEnabled;
+        DynamicPlayer.SetMotionEnabled(MotionEnabled);
+    }
     private void OnSystemParametersChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName != nameof(SystemParameters.ClientAreaAnimation)) return;
@@ -268,7 +287,7 @@ public partial class NotchWindow : Window
         var version = ++_fullscreenTransitionVersion;
         var opacity = Island.Opacity;
         var offset = FullscreenOffset.Y;
-        var hiddenOffset = -Math.Max(Island.ActualHeight, _settings.Current.NotchHeight) - 16;
+        var hiddenOffset = -Math.Max(Island.ActualHeight, ClosedNotchHeight) - AppearanceTopInset - 16;
         Island.BeginAnimation(OpacityProperty, null);
         FullscreenOffset.BeginAnimation(TranslateTransform.YProperty, null);
         Island.Opacity = hidden ? 0 : 1;
@@ -320,6 +339,7 @@ public partial class NotchWindow : Window
     private void RefreshAudio(bool showHud = true)
     {
         var audio = _playerVolume.Current;
+        if (_islandMenuOpen) RefreshIslandMenu();
         if (audio != _lastAudio)
         {
             if (showHud && _lastAudio is { Available: true } && audio.Available && audio.Source == _lastAudio.Source && !_expanded && _settings.Current.ShowVolumeHud)
@@ -354,13 +374,15 @@ public partial class NotchWindow : Window
         if (_expanded && !pin) return;
         if (pin && !_pinned) _previousForeground = NativeMethods.GetForegroundWindow();
         _expanded = true; _pinned = pin; _fullscreenHidden = false;
+        SetMinimalActivity(false);
         AnimateFullscreenVisibility(false, false);
         PinGlyph.Foreground = pin ? (Brush)FindResource("Accent") : (Brush)FindResource("Muted");
         CompactActivity.Visibility = Hud.Visibility = Visibility.Collapsed;
         UpdateDevicePresentation();
-        ExpandedContent.Height = BaseExpandedPanelHeight - NotchMetrics.ContentBottomInset;
+        UpdateExpandedLayout();
+        FinishTabTransitions();
         UpdateVisualizer();
-        AnimateSize(NotchMetrics.ExpandedWidth, ExpandedPanelHeight);
+        AnimateSize(ExpandedPanelWidth, ExpandedPanelHeight);
         AnimateExpandedContent(true);
         if (_activeNotification is not null) UpdateNotificationPresentation();
         if (_selectedTab == "controls") ControlCenter.SetActive(true);
@@ -375,6 +397,7 @@ public partial class NotchWindow : Window
 
     public void Collapse()
     {
+        ResetIslandMenu();
         _controlCenter?.SetActive(false);
         _controlCenter?.CancelAdjustment();
         CancelSeekAdjustment();
@@ -399,14 +422,15 @@ public partial class NotchWindow : Window
 
     private void AnimateSize(double width, double height, int milliseconds = 600)
     {
+        if (IsDynamicIsland) milliseconds = Math.Min(milliseconds, 450);
         var expansion = _expanded ? 1.0 : _activeNotification is not null ? 0.65 : _deviceConnection is not null ? 0.25 : 0.0;
         if (_targetWidth == width && _targetHeight == height && _targetExpansion == expansion) return;
         _targetWidth = width; _targetHeight = height;
         _targetExpansion = expansion;
         var fromWidth = Island.Width; var fromHeight = Island.Height; var fromExpansion = Surface.Expansion;
         var velocities = _sizeMotion?.PresentedVelocities() ?? (Width: 0.0, Height: 0.0, Contour: 0.0);
-        var distance = Math.Max(Math.Abs(width - fromWidth) / (NotchMetrics.ExpandedWidth - _settings.Current.NotchWidth),
-            Math.Abs(height - fromHeight) / (NotchMetrics.ExpandedHeight - _settings.Current.NotchHeight));
+        var distance = Math.Max(Math.Abs(width - fromWidth) / Math.Max(1, ExpandedPanelWidth - (IsDynamicIsland ? DynamicIslandMetrics.IdleWidth : _settings.Current.NotchWidth)),
+            Math.Abs(height - fromHeight) / Math.Max(1, BaseExpandedPanelHeight - ClosedNotchHeight));
         var duration = DurationFor((int)(milliseconds * Math.Clamp(distance, 0.65, 1)));
         var version = ++_sizeTransitionVersion;
         SpringEase CreateEase(double velocity, double distance) => new()
@@ -414,7 +438,7 @@ public partial class NotchWindow : Window
             // Apple's recommended general-purpose spring has no bounce. Desktop
             // input gets a restrained response while preserving retarget velocity.
             DampingRatio = 1,
-            ResponseSeconds = _expanded ? 0.42 : 0.45,
+            ResponseSeconds = IsDynamicIsland ? (_expanded ? 0.35 : 0.38) : (_expanded ? 0.42 : 0.45),
             AnimationSeconds = Math.Max(0.01, duration.TimeSpan.TotalSeconds),
             InitialVelocity = Math.Abs(distance) > 0.000001 ? velocity / distance : 0
         };
@@ -506,14 +530,16 @@ public partial class NotchWindow : Window
     private void UpdateContour()
     {
         if (Surface is null || DropHighlight is null) return;
-        var geometry = NotchSurface.CreateGeometry(Island.ActualWidth, Island.ActualHeight, Surface.Expansion);
+        var geometry = NotchSurface.CreateGeometry(Island.ActualWidth, Island.ActualHeight, Surface.Expansion, IsDynamicIsland);
         Island.Clip = geometry; DropHighlight.Data = geometry;
         var shoulder = NotchMetrics.ClosedShoulder + (NotchMetrics.OpenShoulder - NotchMetrics.ClosedShoulder) * Surface.Expansion;
         TopSeam.Margin = new Thickness(shoulder, 0, shoulder, 0);
+        UpdateMinimalPosition();
     }
     private void UpdateCameraSpace()
     {
-        CompactCameraSpace.Width = HeaderCameraSpace.Width = _settings.Current.NotchWidth - 2 * NotchMetrics.ClosedShoulder;
+        CompactCameraSpace.Width = IsDynamicIsland ? DynamicIslandMetrics.CameraWidth : _settings.Current.NotchWidth - 2 * NotchMetrics.ClosedShoulder;
+        HeaderCameraSpace.Width = IsDynamicIsland ? 0 : _settings.Current.NotchWidth - 2 * NotchMetrics.ClosedShoulder;
         // Reserve the actual tab margins and round down so layout rounding never
         // pushes the last tab into the fixed camera area at wider custom sizes.
         var leftTabs = new[] { MusicTab, FilesTab, FocusTab, CalendarTab, UpdateTab }.Where(tab => tab.Visibility != Visibility.Collapsed).ToArray();
@@ -548,6 +574,7 @@ public partial class NotchWindow : Window
         DropHighlight.BeginAnimation(OpacityProperty, null); DropHighlight.Opacity = _dragActive ? 1 : 0;
         FinishTabTransitions();
         FinishDeviceAnimations();
+        FinishDynamicAnimations();
         if (_activeNotification is not null) UpdateNotificationPresentation();
         UpdateContour();
     }
@@ -561,7 +588,7 @@ public partial class NotchWindow : Window
     private void OnIslandLeave(object sender, MouseEventArgs e)
     {
         _pointerInside = false;
-        if (_activeNotification is not null) _notificationTimer.Start();
+        if (_activeNotification is not null) ResumeNotificationTimer();
         _collapseTimer.Stop();
         CollapseIfPointerOutside();
     }
@@ -570,7 +597,7 @@ public partial class NotchWindow : Window
         if (_expanded && !_pointerInside && !_pinned && !_dialogOpen && !_dragActive
             && !IsFocusEditing && _organizer?.IsEditing != true
             && _controlCenter?.IsInteracting != true
-            && !VolumeSlider.IsAdjusting && !SeekSlider.IsAdjusting)
+            && !VolumeSlider.IsAdjusting && !SeekSlider.IsAdjusting && !DynamicPlayer.IsSeeking && !IslandMenuPanel.IsAdjustingVolume)
             Collapse();
     }
     private void OnIslandClick(object sender, MouseButtonEventArgs e)
@@ -619,6 +646,7 @@ public partial class NotchWindow : Window
         var update = !uploading && _updates?.HasUpdate == true;
         var music = _media.Current.HasSession;
         var activity = update || _settings.Current.ShowLiveActivity && (_focus.IsStarted || music || uploading);
+        if (IsDynamicIsland) { UpdateDynamicCompact(activity, music, uploading, update); return; }
         var wasHidden = CompactActivity.Visibility != Visibility.Visible;
         CompactActivity.Visibility = activity ? Visibility.Visible : Visibility.Collapsed;
         Hud.Visibility = Visibility.Collapsed;
@@ -647,7 +675,8 @@ public partial class NotchWindow : Window
     private void UpdateVisualizer()
     {
         UpdatePlaybackRendering();
-        var animate = !_expanded && !_showingHud && _deviceConnection is null && !_fullscreenHidden && CompactBars.Visibility == Visibility.Visible
+        var animate = ((!_expanded && CompactBars.Visibility == Visibility.Visible) || (_expanded && UsesIslandPlayer && _media.Current.IsPlaying))
+            && !_showingHud && _deviceConnection is null && !_fullscreenHidden
             && !_settings.Current.ReducedMotion && SystemParameters.ClientAreaAnimation;
         if (animate)
         {
@@ -676,6 +705,7 @@ public partial class NotchWindow : Window
         }
         _spectrum.Read(_spectrumBands);
         CompactBars.Update(_spectrumBands, elapsed, false);
+        if (UsesIslandPlayer && _expanded) DynamicPlayer.UpdateSpectrum(_spectrumBands, elapsed);
     }
 
     private void StopVisualizer()
@@ -685,12 +715,14 @@ public partial class NotchWindow : Window
         _visualizerClock.Reset();
         _spectrum.Stop();
         CompactBars.Update(ReadOnlySpan<float>.Empty, 0, true);
+        DynamicPlayer?.UpdateSpectrum(ReadOnlySpan<float>.Empty, 0.1);
     }
 
     private void ShowHud(string title, NotchIconKind icon, double progress, string value)
     {
         if (_expanded || _fullscreenHidden || _deviceConnection is not null || _activeNotification is not null) return;
         _showingHud = true;
+        SetMinimalActivity(false);
         CompactActivity.Visibility = Visibility.Collapsed; Hud.Visibility = Visibility.Visible;
         HudTitle.Text = title; HudGlyph.Kind = icon; HudValue.Text = value; HudProgress.Value = progress;
         HudGlyph.BatteryLevel = progress;
@@ -698,7 +730,7 @@ public partial class NotchWindow : Window
         var volume = icon is NotchIconKind.Speaker or NotchIconKind.MutedSpeaker;
         HudGlyph.Foreground = HudProgress.Foreground = (Brush)FindResource(icon == NotchIconKind.Check ? "FocusOrange" : "Accent");
         HudTitle.Visibility = volume ? Visibility.Collapsed : Visibility.Visible;
-        AnimateSize(300, volume ? 48 : 62);
+        AnimateSize(IsDynamicIsland ? DynamicIslandMetrics.CompactWidth : 300, volume ? 48 : 62);
         UpdateVisualizer();
         _hudTimer.Stop(); _hudTimer.Start();
     }
@@ -714,6 +746,7 @@ public partial class NotchWindow : Window
             _pendingSeekPosition = null;
             _seekKeyboardTimer.Stop();
             SeekSlider.CancelAdjustment();
+            DynamicPlayer.CancelInteraction();
         }
         _audio.SetSource(media.HasSession ? media.Source : "");
         _changingMediaSource = true;
@@ -725,6 +758,7 @@ public partial class NotchWindow : Window
         TrackTitle.Text = media.HasSession ? media.Title : "No music playing";
         TrackArtist.Text = media.HasSession ? media.Artist : "Start a song in your favorite app";
         AlbumArtwork.Source = media.Artwork;
+        DynamicPlayer.Refresh(media, updateTimeline: false);
         ArtworkPlaceholder.Visibility = media.Artwork is null ? Visibility.Visible : Visibility.Collapsed;
         PlayGlyph.Kind = media.IsPlaying ? NotchIconKind.Pause : NotchIconKind.Play;
         UpdateArtwork();
@@ -810,7 +844,7 @@ public partial class NotchWindow : Window
     }
     private void UpdateTimeline()
     {
-        if (_seeking || _seekKeyboardTimer.IsEnabled) return;
+        if (_seeking || _seekKeyboardTimer.IsEnabled || UsesIslandPlayer && DynamicPlayer.HasPendingSeek) return;
         var position = _media.Current.HasSession ? _media.EstimatedPosition.TotalSeconds : 0;
         // Some players acknowledge a seek before publishing their new position.
         // Hold the user's chosen time through those stale timeline updates.
@@ -820,14 +854,27 @@ public partial class NotchWindow : Window
         SeekSlider.Value = position;
         _updatingSeek = false;
         UpdateSeekFeedback(SeekSlider.Value);
+        DynamicPlayer.UpdateTimeline(SeekSlider.Value, _media.Current.Duration.TotalSeconds, SeekSlider.IsEnabled);
     }
     private void UpdateSeekFeedback(double position)
     {
-        var text = _media.Current.HasSession && _media.Current.Duration > TimeSpan.Zero
-            ? FormatMediaTime(TimeSpan.FromSeconds(position)) : "";
-        if (ElapsedLabel.Text == text) return;
-        ElapsedLabel.Text = text;
-        SeekSlider.ToolTip = SeekSlider.IsEnabled ? $"{text} / {DurationLabel.Text}" : "Seeking unavailable for this app";
+        var hasTime = _media.Current.HasSession && _media.Current.Duration > TimeSpan.Zero;
+        var time = hasTime ? TimeSpan.FromSeconds(position) : TimeSpan.Zero;
+        var second = time.Ticks / TimeSpan.TicksPerSecond;
+        if (_elapsedFeedbackSecond != second || _elapsedFeedbackHasTime != hasTime)
+        {
+            _elapsedFeedbackSecond = second;
+            _elapsedFeedbackHasTime = hasTime;
+            ElapsedLabel.Text = hasTime ? FormatMediaTime(time) : "";
+        }
+        // Duration and availability can change while elapsed stays in the same
+        // second; keep their tooltip feedback independent from the text cache.
+        var enabled = SeekSlider.IsEnabled;
+        if (_seekTooltipEnabled == enabled && _seekTooltipElapsed == ElapsedLabel.Text && _seekTooltipDuration == DurationLabel.Text) return;
+        _seekTooltipEnabled = enabled;
+        _seekTooltipElapsed = ElapsedLabel.Text;
+        _seekTooltipDuration = DurationLabel.Text;
+        SeekSlider.ToolTip = enabled ? $"{ElapsedLabel.Text} / {DurationLabel.Text}" : "Seeking unavailable for this app";
     }
     private async Task CommitSeekAsync(double position)
     {
@@ -850,6 +897,8 @@ public partial class NotchWindow : Window
         _seekKeyboardTimer.Stop();
         _pendingSeekPosition = null;
         SeekSlider.CancelAdjustment();
+        DynamicPlayer.CancelInteraction();
+        _seeking = false;
         UpdateTimeline();
     }
     private static string FormatMediaTime(TimeSpan time) => time.TotalHours >= 1 ? $"{(long)time.TotalHours}:{time.Minutes:00}:{time.Seconds:00}" : $"{(int)time.TotalMinutes}:{time.Seconds:00}";
@@ -929,16 +978,19 @@ public partial class NotchWindow : Window
     }
     private void AddAndUpload(string[] paths)
     {
-        var added = _shelf.Add(paths);
-        var items = _shelf.Items.Where(i => paths.Contains(i.Path, StringComparer.OrdinalIgnoreCase)).ToArray();
+        var normalized = paths.Select(path => FileShelf.NormalizePath(path)).OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var added = _shelf.Add(normalized);
+        var items = _shelf.Items.Where(i => normalized.Contains(i.Path, StringComparer.OrdinalIgnoreCase)).ToArray();
         foreach (var item in items) _uploads.Enqueue(item);
         if (added == 0 && items.Length == 0) Notification?.Invoke(this, _shelf.Items.Count >= 24 ? "The shelf is full (24 items). Remove an item to make space." : "Those files are unavailable.");
     }
     private static ShelfItem? TaggedItem(object sender) => (sender as FrameworkElement)?.Tag as ShelfItem;
     private void OnShelfCopy(object sender, RoutedEventArgs e) { if (TaggedItem(sender) is { HasLink: true } item) CopyLink(item.ShareUrl); }
-    private void OnShelfCopyDirect(object sender, RoutedEventArgs e) { if (TaggedItem(sender) is { HasLink: true } item) CopyLink(item.FileUrl); }
+    private void OnShelfCopyDirect(object sender, RoutedEventArgs e) { if (TaggedItem(sender) is { HasDirectLink: true } item) CopyLink(item.FileUrl); }
     private void CopyLink(string link)
     {
+        if (!UploadClient.IsShareLink(link)) return;
         try { Clipboard.SetText(link); ShelfConnection.Content = "Link copied"; }
         catch (System.Runtime.InteropServices.COMException) { ShelfConnection.Content = "Clipboard busy. Try again."; }
     }
@@ -992,12 +1044,22 @@ public partial class NotchWindow : Window
     internal void CloseForShutdown() { _allowClose = true; Close(); }
     protected override void OnClosing(CancelEventArgs e)
     {
+        if (!_viewInitialized) { base.OnClosing(e); return; }
         if (!_allowClose) { e.Cancel = true; Collapse(); }
         base.OnClosing(e);
     }
     protected override void OnClosed(EventArgs e)
     {
+        if (!_viewInitialized)
+        {
+            if (_ownsUploads) _uploads.Dispose();
+            if (_ownsPlayerVolume) _playerVolume.Dispose();
+            base.OnClosed(e);
+            return;
+        }
         _closed = true;
+        DynamicPlayer?.CancelInteraction();
+        IslandMenuPanel?.CancelInteraction();
         StopWatchingOverlayVisibility();
         _notificationTimer.Stop(); _notificationQueue.Clear(); _activeNotification = null;
         if (_updates is not null) _updates.Changed -= OnUpdateChanged;

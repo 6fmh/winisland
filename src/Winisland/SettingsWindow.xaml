@@ -71,6 +71,21 @@
   <Style TargetType="PasswordBox">
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="PasswordBox"><Border x:Name="Surface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}"><ScrollViewer x:Name="PART_ContentHost"/></Border><ControlTemplate.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="BorderBrush" Value="{StaticResource SettingsFocus}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
   </Style>
+  <Style x:Key="AppearanceChoice" TargetType="RadioButton">
+   <Setter Property="Background" Value="White"/><Setter Property="BorderBrush" Value="#DCDCE1"/><Setter Property="BorderThickness" Value="1"/>
+   <Setter Property="Foreground" Value="{StaticResource Ink}"/><Setter Property="Cursor" Value="Hand"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+    <Border x:Name="ChoiceSurface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10" Padding="12">
+     <Grid><ContentPresenter/><Border x:Name="SelectionMark" Width="18" Height="18" CornerRadius="9" Background="{StaticResource SettingsFocus}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Visibility="Collapsed"><Path Data="M4,9 L7,12 L13,6" Stroke="White" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border></Grid>
+    </Border>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsChecked" Value="True"><Setter TargetName="ChoiceSurface" Property="BorderBrush" Value="{StaticResource SettingsFocus}"/><Setter TargetName="ChoiceSurface" Property="Background" Value="#F0F6FF"/><Setter TargetName="SelectionMark" Property="Visibility" Value="Visible"/></Trigger>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ChoiceSurface" Property="BorderBrush" Value="{StaticResource SettingsFocus}"/></Trigger>
+     <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ChoiceSurface" Property="BorderThickness" Value="2"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="ChoiceSurface" Property="Opacity" Value="0.8"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
  </Window.Resources>
  <Border Margin="14" Background="#F5F5F7" CornerRadius="12" BorderBrush="#D7D7DE" BorderThickness="1">
   <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="5" Opacity="0.15"/></Border.Effect>
@@ -93,7 +108,8 @@
        <Border Width="44" Height="44" CornerRadius="12" Background="#202024" HorizontalAlignment="Left"><Image Source="Assets/Winisland.png" Margin="3"/></Border>
        <TextBlock Text="Winisland" FontSize="21" FontWeight="SemiBold" Margin="0,12,0,3"/>
       </StackPanel>
-      <StackPanel Grid.Row="1">
+      <ScrollViewer x:Name="NavigationScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False" Padding="0,0,3,0">
+      <StackPanel>
        <Button x:Name="GeneralNav" Style="{StaticResource NavButton}" Selector.IsSelected="True" Tag="general" Click="OnNavClick" AutomationProperties.Name="General"><StackPanel Orientation="Horizontal"><controls:NotchIcon Kind="Settings" Style="{StaticResource SettingsNavIcon}"/><TextBlock Text="General" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/></StackPanel></Button>
        <Button x:Name="AppearanceNav" Style="{StaticResource NavButton}" Tag="appearance" Click="OnNavClick" AutomationProperties.Name="Appearance"><StackPanel Orientation="Horizontal"><Path Data="M3,4 H21 Q22,4 22,5 V19 Q22,20 21,20 H3 Q2,20 2,19 V5 Q2,4 3,4 Z M2,8 H22 M8,8 V20" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6" StrokeLineJoin="Round" Width="16" Height="16" Stretch="Uniform" Margin="0,0,12,0" VerticalAlignment="Center"/><TextBlock Text="Appearance" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/></StackPanel></Button>
        <Button x:Name="ActivitiesNav" Style="{StaticResource NavButton}" Tag="activities" Click="OnNavClick" AutomationProperties.Name="Activities"><StackPanel Orientation="Horizontal"><controls:NotchIcon Kind="Music" Style="{StaticResource SettingsNavIcon}"/><TextBlock Text="Activities" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/></StackPanel></Button>
@@ -101,6 +117,7 @@
        <Button x:Name="UploadsNav" Style="{StaticResource NavButton}" Tag="uploads" Click="OnNavClick" AutomationProperties.Name="Uploads"><StackPanel Orientation="Horizontal"><controls:NotchIcon Kind="Upload" Style="{StaticResource SettingsNavIcon}"/><TextBlock Text="Uploads" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/></StackPanel></Button>
        <Button x:Name="AboutNav" Style="{StaticResource NavButton}" Tag="about" Click="OnNavClick" AutomationProperties.Name="About Winisland"><StackPanel Orientation="Horizontal"><Path Data="M12,17 V11 M12,7 V7.2 M12,2 A10,10 0 1 1 11.99,2" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="16" Height="16" Stretch="Uniform" Margin="0,0,12,0" VerticalAlignment="Center"/><TextBlock Text="About Winisland" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/></StackPanel></Button>
       </StackPanel>
+      </ScrollViewer>
       <StackPanel Grid.Row="2" Margin="12,0" VerticalAlignment="Bottom">
        <StackPanel Orientation="Horizontal"><Ellipse Width="6" Height="6" Fill="#28C840" Margin="0,0,7,0"/><TextBlock Text="Running" FontSize="11" Foreground="{StaticResource Secondary}"/></StackPanel>
        <TextBlock Text="Ctrl + Alt + N to open your notch" FontSize="10" Foreground="{StaticResource Secondary}" Margin="0,8,0,15" TextWrapping="Wrap" LineHeight="14"/>
@@ -120,29 +137,41 @@
          <Grid.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#A596ED" Offset="0"/><GradientStop Color="#7173E8" Offset="0.55"/><GradientStop Color="#2D76D3" Offset="1"/></LinearGradientBrush></Grid.Background>
          <Path Fill="#5247B4" Opacity="0.35" Data="M0,146 L0,105 Q80,32 160,78 Q245,120 350,64 Q480,18 600,96 L600,146 Z" Stretch="Fill" VerticalAlignment="Bottom" Height="107"/>
          <Path Fill="#214DAC" Opacity="0.38" Data="M0,146 L0,130 Q120,62 235,104 Q320,138 400,85 Q490,45 600,100 L600,146 Z" Stretch="Fill" Height="78" VerticalAlignment="Bottom"/>
-         <Grid x:Name="NotchPreview" Width="{x:Static controls:NotchMetrics.DefaultWidth}" Height="{x:Static controls:NotchMetrics.DefaultHeight}" VerticalAlignment="Top" HorizontalAlignment="Center"><controls:NotchSurface Expansion="0"/></Grid>
+         <Grid x:Name="NotchPreview" Width="{x:Static controls:NotchMetrics.DefaultWidth}" Height="{x:Static controls:NotchMetrics.DefaultHeight}" VerticalAlignment="Top" HorizontalAlignment="Center"><controls:NotchSurface x:Name="PreviewSurface" Expansion="0"/></Grid>
          <Border Background="#30FFFFFF" CornerRadius="9" Padding="9,5" VerticalAlignment="Bottom" HorizontalAlignment="Right" Margin="0,0,17,21"><TextBlock Text="LIVE PREVIEW" FontSize="10" Foreground="White"/></Border>
         </Grid>
        </Border>
         <StackPanel x:Name="GeneralPanel"><Border Style="{StaticResource SettingsGroup}"><StackPanel>
-        <Grid Height="60"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="50"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock Text="Open on hover" FontWeight="SemiBold"/><TextBlock Text="Your island opens as soon as your pointer enters it." Foreground="{StaticResource Secondary}" FontSize="11" Margin="0,5,0,0"/></StackPanel><CheckBox x:Name="HoverToggle" Grid.Column="1" Style="{StaticResource Toggle}" VerticalAlignment="Center" Checked="OnSettingChanged" Unchecked="OnSettingChanged" AutomationProperties.Name="Open on hover"/></Grid>
+        <Grid MinHeight="60"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="50"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center" Margin="0,10,12,10"><TextBlock Text="Open on hover" FontWeight="SemiBold"/><TextBlock Text="Your island opens as soon as your pointer enters it." TextWrapping="Wrap" Foreground="{StaticResource Secondary}" FontSize="11" Margin="0,5,0,0"/></StackPanel><CheckBox x:Name="HoverToggle" Grid.Column="1" Style="{StaticResource Toggle}" VerticalAlignment="Center" Checked="OnSettingChanged" Unchecked="OnSettingChanged" AutomationProperties.Name="Open on hover"/></Grid>
         <Border Height="1" Background="#DFDFE6"/>
-        <Grid Height="60"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="50"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock Text="Hide in fullscreen" FontWeight="SemiBold"/><TextBlock Text="Keep films, games, and presentations clear." Foreground="{StaticResource Secondary}" FontSize="11" Margin="0,5,0,0"/></StackPanel><CheckBox x:Name="FullscreenToggle" Grid.Column="1" Style="{StaticResource Toggle}" VerticalAlignment="Center" Checked="OnSettingChanged" Unchecked="OnSettingChanged" AutomationProperties.Name="Hide notch in fullscreen"/></Grid>
+        <Grid MinHeight="60"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="50"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center" Margin="0,10,12,10"><TextBlock Text="Hide in fullscreen" FontWeight="SemiBold"/><TextBlock Text="Keep films, games, and presentations clear." TextWrapping="Wrap" Foreground="{StaticResource Secondary}" FontSize="11" Margin="0,5,0,0"/></StackPanel><CheckBox x:Name="FullscreenToggle" Grid.Column="1" Style="{StaticResource Toggle}" VerticalAlignment="Center" Checked="OnSettingChanged" Unchecked="OnSettingChanged" AutomationProperties.Name="Hide notch in fullscreen"/></Grid>
         <Border Height="1" Background="#DFDFE6"/>
-        <Grid Height="60"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="50"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock Text="Start with Windows" FontWeight="SemiBold"/><TextBlock Text="A familiar little hello when you sign in." Foreground="{StaticResource Secondary}" FontSize="11" Margin="0,5,0,0"/></StackPanel><CheckBox x:Name="StartupToggle" Grid.Column="1" Style="{StaticResource Toggle}" VerticalAlignment="Center" Checked="OnSettingChanged" Unchecked="OnSettingChanged" AutomationProperties.Name="Start with Windows"/></Grid>
+        <Grid MinHeight="60"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="50"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center" Margin="0,10,12,10"><TextBlock Text="Start with Windows" FontWeight="SemiBold"/><TextBlock Text="A familiar little hello when you sign in." TextWrapping="Wrap" Foreground="{StaticResource Secondary}" FontSize="11" Margin="0,5,0,0"/></StackPanel><CheckBox x:Name="StartupToggle" Grid.Column="1" Style="{StaticResource Toggle}" VerticalAlignment="Center" Checked="OnSettingChanged" Unchecked="OnSettingChanged" AutomationProperties.Name="Start with Windows"/></Grid>
         <Border Height="1" Background="#DFDFE6"/>
-        <Grid Height="67"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="196"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock Text="Display" FontWeight="SemiBold"/><TextBlock Text="Choose the screen for your notch." Foreground="{StaticResource Secondary}" FontSize="11" Margin="0,5,0,0"/></StackPanel><ComboBox x:Name="MonitorCombo" Grid.Column="1" VerticalAlignment="Center" Height="30" SelectionChanged="OnMonitorChanged" DisplayMemberPath="Label" AutomationProperties.Name="Notch display"/></Grid>
+        <Grid MinHeight="67"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="196"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center" Margin="0,10,12,10"><TextBlock Text="Display" FontWeight="SemiBold"/><TextBlock Text="Choose the screen for your notch." TextWrapping="Wrap" Foreground="{StaticResource Secondary}" FontSize="11" Margin="0,5,0,0"/></StackPanel><ComboBox x:Name="MonitorCombo" Grid.Column="1" VerticalAlignment="Center" Height="30" SelectionChanged="OnMonitorChanged" DisplayMemberPath="Label" AutomationProperties.Name="Notch display"/></Grid>
         </StackPanel></Border></StackPanel>
         <StackPanel x:Name="AppearancePanel" Visibility="Collapsed"><Border Style="{StaticResource SettingsGroup}" Padding="16"><StackPanel>
+        <TextBlock Text="Notch style" FontWeight="SemiBold" Margin="0,0,0,12"/>
+        <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
+         <RadioButton x:Name="MacBookChoice" GroupName="NotchAppearance" Style="{StaticResource AppearanceChoice}" Checked="OnAppearanceChanged" AutomationProperties.Name="MacBook notch" AutomationProperties.HelpText="The original notch attached to the display edge. Default appearance.">
+          <StackPanel><Border Height="47" CornerRadius="5" Background="#A7A4E5" Margin="0,0,0,12"><controls:NotchSurface Width="84" Height="18" VerticalAlignment="Top" HorizontalAlignment="Center"/></Border><TextBlock Text="MacBook notch" TextWrapping="Wrap" FontSize="12" FontWeight="Medium" Margin="0,0,24,0"/><TextBlock Text="Original · default" FontSize="10" Foreground="{StaticResource Secondary}" Margin="0,4,0,0"/></StackPanel>
+         </RadioButton>
+         <RadioButton x:Name="DynamicIslandChoice" Grid.Column="2" GroupName="NotchAppearance" Style="{StaticResource AppearanceChoice}" Checked="OnAppearanceChanged" AutomationProperties.Name="Dynamic Island" AutomationProperties.HelpText="The floating iPhone pill with compact and expanded live activities.">
+          <StackPanel><Border Height="47" CornerRadius="5" Background="#A7A4E5" Margin="0,0,0,12"><controls:NotchSurface Width="64" Height="19" IsDynamicIsland="True" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,8,0,0"/></Border><TextBlock Text="Dynamic Island" TextWrapping="Wrap" FontSize="12" FontWeight="Medium" Margin="0,0,24,0"/><TextBlock Text="Inspired by iPhone" FontSize="10" Foreground="{StaticResource Secondary}" Margin="0,4,0,0"/></StackPanel>
+         </RadioButton>
+        </Grid>
+        <TextBlock x:Name="AppearanceDescription" Text="The original MacBook silhouette, attached to the top of your display." Foreground="{StaticResource Secondary}" FontSize="11" TextWrapping="Wrap" LineHeight="17" Margin="0,0,0,16"/>
+        <StackPanel x:Name="MacBookSizeSettings">
         <Grid Margin="0,0,0,8"><TextBlock Text="Notch width" FontWeight="SemiBold"/><TextBlock x:Name="WidthLabel" Text="190 DIPs" HorizontalAlignment="Right" Foreground="{StaticResource Secondary}" FontSize="11"/></Grid>
         <Slider x:Name="WidthSlider" Style="{StaticResource LightSlider}" Minimum="160" Maximum="320" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="OnSizeChanged" AutomationProperties.Name="Notch width" Margin="0,0,0,20"/>
         <Grid Margin="0,0,0,8"><TextBlock Text="Notch height" FontWeight="SemiBold"/><TextBlock x:Name="HeightLabel" Text="32 DIPs" HorizontalAlignment="Right" Foreground="{StaticResource Secondary}" FontSize="11"/></Grid>
         <Slider x:Name="HeightSlider" Style="{StaticResource LightSlider}" Minimum="24" Maximum="48" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="OnSizeChanged" AutomationProperties.Name="Notch height" Margin="0,0,0,15"/>
         <TextBlock Text="MacBook Air proportions: 190 × 32. Scales with your display." Foreground="{StaticResource Secondary}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
+        </StackPanel>
         <Border Height="1" Background="#DFDFE6"/>
-        <Grid Height="63"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="50"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock Text="Live activities" FontWeight="SemiBold"/><TextBlock Text="Show music and timer status in the closed notch." Foreground="{StaticResource Secondary}" FontSize="11" Margin="0,5,0,0"/></StackPanel><CheckBox x:Name="LiveToggle" Grid.Column="1" Style="{StaticResource Toggle}" VerticalAlignment="Center" Checked="OnSettingChanged" Unchecked="OnSettingChanged" AutomationProperties.Name="Show compact live activity"/></Grid>
+        <Grid MinHeight="63"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="50"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center" Margin="0,10,12,10"><TextBlock Text="Live activities" FontWeight="SemiBold"/><TextBlock Text="Show music and timer status in the closed notch." TextWrapping="Wrap" Foreground="{StaticResource Secondary}" FontSize="11" Margin="0,5,0,0"/></StackPanel><CheckBox x:Name="LiveToggle" Grid.Column="1" Style="{StaticResource Toggle}" VerticalAlignment="Center" Checked="OnSettingChanged" Unchecked="OnSettingChanged" AutomationProperties.Name="Show compact live activity"/></Grid>
         <Border Height="1" Background="#DFDFE6"/>
-        <Grid Height="63"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="50"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock Text="Reduce motion" FontWeight="SemiBold"/><TextBlock Text="Keep transitions instant. Windows preferences also apply." Foreground="{StaticResource Secondary}" FontSize="11" Margin="0,5,0,0" TextWrapping="Wrap"/></StackPanel><CheckBox x:Name="MotionToggle" Grid.Column="1" Style="{StaticResource Toggle}" VerticalAlignment="Center" Checked="OnSettingChanged" Unchecked="OnSettingChanged" AutomationProperties.Name="Reduce motion"/></Grid>
+        <Grid MinHeight="63"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="50"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center" Margin="0,10,12,10"><TextBlock Text="Reduce motion" FontWeight="SemiBold"/><TextBlock Text="Keep transitions instant. Windows preferences also apply." Foreground="{StaticResource Secondary}" FontSize="11" Margin="0,5,0,0" TextWrapping="Wrap"/></StackPanel><CheckBox x:Name="MotionToggle" Grid.Column="1" Style="{StaticResource Toggle}" VerticalAlignment="Center" Checked="OnSettingChanged" Unchecked="OnSettingChanged" AutomationProperties.Name="Reduce motion"/></Grid>
         </StackPanel></Border></StackPanel>
         <StackPanel x:Name="ActivitiesPanel" Visibility="Collapsed">
         <Border Background="White" CornerRadius="13" Padding="18" Margin="0,0,0,10"><StackPanel><StackPanel Orientation="Horizontal"><controls:NotchIcon Kind="Music" Width="18" Height="18" Foreground="#6B60D6" Margin="0,0,10,0" VerticalAlignment="Center"/><TextBlock Text="Your soundtrack" FontSize="16" FontWeight="SemiBold"/></StackPanel><TextBlock Text="Album art, playback controls, and seeking. Small audio bars react while the notch is closed. Middle-click to play or pause; scroll to adjust the player's own volume. Connect Comet in Player controls." TextWrapping="Wrap" Foreground="{StaticResource Secondary}" FontSize="11" LineHeight="18" Margin="0,8,0,0"/></StackPanel></Border>
@@ -158,33 +187,33 @@
        </StackPanel>
        <StackPanel x:Name="PlayersPanel" Visibility="Collapsed">
         <Border Background="White" CornerRadius="13" Padding="20" Margin="0,0,0,18"><StackPanel>
-         <TextBlock Text="Volume, inside your player" FontSize="20" FontWeight="SemiBold"/>
+         <TextBlock Text="Volume, inside your player" TextWrapping="Wrap" FontSize="20" FontWeight="SemiBold"/>
          <TextBlock Text="Adjust the same volume control you use in Spotify, YouTube, and other web players. The notch targets your selected media player." Foreground="{StaticResource Secondary}" FontSize="12" TextWrapping="Wrap" LineHeight="19" Margin="0,8,0,14"/>
          <StackPanel Orientation="Horizontal"><Ellipse x:Name="BrowserConnectionDot" Width="7" Height="7" Fill="#A0A0A8" Margin="0,0,8,0"/><TextBlock x:Name="BrowserConnectionStatus" Text="Browser companion not connected" FontSize="11" Foreground="{StaticResource Secondary}" AutomationProperties.LiveSetting="Polite"/></StackPanel>
         </StackPanel></Border>
         <TextBlock Text="Connect Comet" FontSize="15" FontWeight="SemiBold"/>
         <TextBlock Text="1. Open Comet's extensions page and turn on Developer mode.&#x0a;2. Choose Load unpacked and select the companion folder.&#x0a;3. Reload your media tab. Player volume appears automatically." FontSize="12" Foreground="{StaticResource Secondary}" TextWrapping="Wrap" LineHeight="21" Margin="0,9,0,14"/>
-        <StackPanel Orientation="Horizontal">
-         <Button Content="Open companion folder" Style="{StaticResource LightButton}" Click="OnOpenBrowserCompanion" AutomationProperties.Name="Open browser companion folder"/>
-         <Button Content="Open Comet extensions" Style="{StaticResource LightButton}" Click="OnOpenCometExtensions" Margin="8,0,0,0" AutomationProperties.Name="Open Comet extensions"/>
-        </StackPanel>
+        <WrapPanel>
+         <Button Content="Open companion folder" Style="{StaticResource LightButton}" Click="OnOpenBrowserCompanion" AutomationProperties.Name="Open browser companion folder" Margin="0,0,8,8"/>
+         <Button Content="Open Comet extensions" Style="{StaticResource LightButton}" Click="OnOpenCometExtensions" AutomationProperties.Name="Open Comet extensions" Margin="0,0,8,8"/>
+        </WrapPanel>
         <TextBlock x:Name="PlayerSetupStatus" Text="The companion controls HTML5 audio/video and YouTube's player. It also works with Chrome, Edge, Brave, and other Chromium browsers." TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource Secondary}" Margin="0,16,0,0" LineHeight="18"/>
         <Border Height="1" Background="#DFDFE6" Margin="0,20"/>
         <TextBlock Text="Spotify desktop" FontSize="15" FontWeight="SemiBold"/>
         <TextBlock x:Name="SpotifySetupStatus" Text="Local playback and volume updates connect automatically when Spotify exposes its controls. Use Connect Spotify if needed. Some desktop versions expose 10% volume steps." TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource Secondary}" Margin="0,8,0,12" LineHeight="19" AutomationProperties.LiveSetting="Polite"/>
         <Button x:Name="ConnectSpotifyButton" Content="Connect Spotify" Style="{StaticResource LightButton}" HorizontalAlignment="Left" Click="OnConnectSpotify" AutomationProperties.Name="Connect Spotify player volume"/>
         <Border Background="White" CornerRadius="13" Padding="18" Margin="0,18,0,0"><StackPanel>
-         <TextBlock Text="Connect your Spotify account" FontSize="15" FontWeight="SemiBold"/>
+         <TextBlock Text="Connect your Spotify account" TextWrapping="Wrap" FontSize="15" FontWeight="SemiBold"/>
          <TextBlock Text="Get 1% volume steps, including when Spotify is minimized. Requires Spotify Premium and your own app in the Spotify Developer Dashboard. Commands target Spotify on this PC." TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource Secondary}" Margin="0,8,0,12" LineHeight="19"/>
          <Button Content="Open Spotify Developer Dashboard" Style="{StaticResource LightButton}" HorizontalAlignment="Left" Click="OnOpenSpotifyDashboard"/>
          <TextBlock Text="Create an app with Web API enabled, add your Spotify account to its allowed users, and register this exact redirect URI:" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource Secondary}" Margin="0,12,0,6" LineHeight="18"/>
          <TextBox Text="http://127.0.0.1:43827/spotify/callback/" IsReadOnly="True" Padding="8" AutomationProperties.Name="Spotify redirect URI"/>
          <TextBlock Text="Client ID" FontWeight="SemiBold" Margin="0,12,0,6"/>
          <TextBox x:Name="SpotifyClientIdInput" MaxLength="32" Padding="8" AutomationProperties.Name="Spotify app Client ID"/>
-         <StackPanel Orientation="Horizontal" Margin="0,12,0,10">
-          <Button x:Name="ConnectSpotifyAccountButton" Content="Sign in to Spotify" Style="{StaticResource LightButton}" Click="OnConnectSpotifyAccount"/>
-          <Button x:Name="DisconnectSpotifyAccountButton" Content="Disconnect account" Style="{StaticResource LightButton}" Margin="8,0,0,0" Click="OnDisconnectSpotifyAccount"/>
-         </StackPanel>
+         <WrapPanel Margin="0,12,0,10">
+          <Button x:Name="ConnectSpotifyAccountButton" Content="Sign in to Spotify" Style="{StaticResource LightButton}" Click="OnConnectSpotifyAccount" Margin="0,0,8,8"/>
+          <Button x:Name="DisconnectSpotifyAccountButton" Content="Disconnect account" Style="{StaticResource LightButton}" Click="OnDisconnectSpotifyAccount" Margin="0,0,8,8"/>
+         </WrapPanel>
          <TextBlock x:Name="SpotifyAccountStatus" Text="Account not connected" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource Secondary}" LineHeight="18" AutomationProperties.LiveSetting="Polite"/>
         </StackPanel></Border>
         <TextBlock Text="Local player state stays in memory. Account sign-in sends requests to Spotify and stores an encrypted refresh token for this Windows account." TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource Secondary}" Margin="0,18,0,0" LineHeight="18"/>
@@ -199,25 +228,25 @@
         <TextBox x:Name="UploadServerInput" Height="38" Padding="10,7" FontSize="13" Background="White" BorderBrush="#D4D4DB" BorderThickness="1" MaxLength="2048" AutomationProperties.Name="Upload server HTTPS URL"/>
         <TextBlock Text="Upload token (optional)" FontWeight="SemiBold" Margin="0,14,0,8"/>
         <PasswordBox x:Name="UploadTokenInput" Height="38" Padding="10,7" FontSize="13" Background="#FFFFFF" BorderBrush="#D4D4DB" BorderThickness="1" MaxLength="4096" AutomationProperties.Name="Upload server token"/>
-        <StackPanel Orientation="Horizontal" Margin="0,12,0,18">
-         <Button Content="Save connection" Style="{StaticResource LightButton}" Click="OnSaveUploadToken" AutomationProperties.Name="Save upload connection"/>
-         <Button Content="Import ShareX file…" Style="{StaticResource LightButton}" Margin="8,0,0,0" Click="OnImportUploadToken" AutomationProperties.Name="Import ShareX uploader configuration"/>
-         <Button x:Name="DisconnectUploadButton" Content="Disconnect" Style="{StaticResource LightButton}" Margin="8,0,0,0" Click="OnDisconnectUpload" AutomationProperties.Name="Disconnect upload account"/>
-        </StackPanel>
+        <WrapPanel Margin="0,12,0,18">
+         <Button Content="Save connection" Style="{StaticResource LightButton}" Click="OnSaveUploadToken" AutomationProperties.Name="Save upload connection" Margin="0,0,8,8"/>
+         <Button Content="Import ShareX file…" Style="{StaticResource LightButton}" Click="OnImportUploadToken" AutomationProperties.Name="Import ShareX uploader configuration" Margin="0,0,8,8"/>
+         <Button x:Name="DisconnectUploadButton" Content="Disconnect" Style="{StaticResource LightButton}" Click="OnDisconnectUpload" AutomationProperties.Name="Disconnect upload account" Margin="0,0,8,8"/>
+        </WrapPanel>
         <TextBlock x:Name="UploadStatus" Foreground="{StaticResource Secondary}" FontSize="11" TextWrapping="Wrap" LineHeight="18" AutomationProperties.LiveSetting="Polite"/>
         <Border Height="1" Background="#DFDFE6" Margin="0,20"/>
         <TextBlock Text="No server is selected by default. Manual setup sends a multipart file with an optional Bearer token. ShareX import also supports custom file fields, static headers and form fields, and JSON URL paths. Your connection is encrypted for this Windows account. Original files and folders stay local. Uploads support files up to 90 MB, subject to your server's limits." TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource Secondary}" Margin="0,0,0,0" LineHeight="19"/>
        </StackPanel>
        <StackPanel x:Name="AboutPanel" Visibility="Collapsed">
-        <Border Background="#E8EAFE" CornerRadius="15" Padding="24" Margin="0,0,0,22"><StackPanel><TextBlock Text="A quiet little space at the top&#x0a;of your desktop." FontFamily="{StaticResource DisplayFont}" FontSize="23" FontWeight="SemiBold" LineHeight="30"/><TextBlock x:Name="AboutVersionLabel" FontSize="11" Foreground="{StaticResource Secondary}" Margin="0,14,0,0"/></StackPanel></Border>
+        <Border Background="#E8EAFE" CornerRadius="15" Padding="24" Margin="0,0,0,22"><StackPanel><TextBlock Text="A quiet little space at the top&#x0a;of your desktop." TextWrapping="Wrap" FontFamily="{StaticResource DisplayFont}" FontSize="23" FontWeight="SemiBold" LineHeight="30"/><TextBlock x:Name="AboutVersionLabel" FontSize="11" Foreground="{StaticResource Secondary}" Margin="0,14,0,0"/></StackPanel></Border>
         <TextBlock Text="Inspired by the MacBook silhouette and the thoughtful interactions of Boring Notch. Built for the way Windows works." Foreground="{StaticResource Secondary}" TextWrapping="Wrap" LineHeight="20" Margin="0,0,0,18"/>
         <TextBlock Text="YOUR SHORTCUTS" FontSize="10" Foreground="{StaticResource Secondary}" FontWeight="SemiBold" Margin="0,0,0,12"/>
         <Grid Margin="0,0,0,13"><TextBlock Text="Open or close your notch"/><TextBlock Text="Ctrl + Alt + N" HorizontalAlignment="Right" Foreground="{StaticResource Secondary}"/></Grid>
         <Grid Margin="0,0,0,13"><TextBlock Text="Open settings"/><TextBlock Text="Ctrl + Alt + S" HorizontalAlignment="Right" Foreground="{StaticResource Secondary}"/></Grid>
         <Grid Margin="0,0,0,22"><TextBlock Text="Close a pinned notch"/><TextBlock Text="Esc" HorizontalAlignment="Right" Foreground="{StaticResource Secondary}"/></Grid>
         <TextBlock Text="Native Windows controls, with optional file uploads to a server you choose. No telemetry. Use the tray icon to open settings or quit." FontSize="11" Foreground="{StaticResource Secondary}" TextWrapping="Wrap" LineHeight="18" Margin="0,0,0,18"/>
-        <StackPanel Orientation="Horizontal" Margin="0,0,0,12"><Button Content="Check for updates" Style="{StaticResource LightButton}" Click="OnUpdatesClick"/><Button Content="Source code ↗" Style="{StaticResource LightButton}" Margin="10,0,0,0" Click="OnSourceClick"/></StackPanel>
-        <StackPanel Orientation="Horizontal"><Button Content="Design reference ↗" Style="{StaticResource LightButton}" Click="OnReferenceClick"/><Button Content="Quit Winisland" Style="{StaticResource LightButton}" Margin="10,0,0,0" Click="OnQuitClick"/></StackPanel>
+        <WrapPanel Margin="0,0,0,12"><Button Content="Check for updates" Style="{StaticResource LightButton}" Click="OnUpdatesClick" Margin="0,0,8,8"/><Button Content="Source code ↗" Style="{StaticResource LightButton}" Click="OnSourceClick" Margin="0,0,8,8"/></WrapPanel>
+        <WrapPanel><Button Content="Design reference ↗" Style="{StaticResource LightButton}" Click="OnReferenceClick" Margin="0,0,8,8"/><Button Content="Quit Winisland" Style="{StaticResource LightButton}" Click="OnQuitClick" Margin="0,0,8,8"/></WrapPanel>
        </StackPanel>
       </StackPanel>
      </ScrollViewer>

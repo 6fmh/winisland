@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using Winisland.Controls;
 using Winisland.Services;
 
@@ -163,6 +164,40 @@ internal static class OrganizerVerification
             ((Button)panel.FindName("EventSaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             check(panel.StoreForTest.Events.Single().Title == "Native calendar entry"
                 && !panel.EventEditorVisibleForTest, "Native calendar editor validates and saves a selected-day event");
+            var savedEvent = panel.StoreForTest.Events.Single();
+            var editor = (Grid)panel.FindName("EventEditor");
+            var cancel = editor.Children.OfType<StackPanel>().Single().Children.OfType<Button>()
+                .Single(button => Equals(button.Content, "Cancel"));
+            var title = (TextBox)panel.FindName("EventTitleBox");
+            var notes = (TextBox)panel.FindName("EventNotesBox");
+            var save = (Button)panel.FindName("EventSaveButton");
+            foreach (var key in new[] { Key.Enter, Key.Space })
+            {
+                panel.EditEventForTest(savedEvent); title.Text = "Canceled keyboard change";
+                check(cancel.Focus(), "Calendar Cancel receives native keyboard focus");
+                SendKey(cancel, key);
+                check(!panel.EventEditorVisibleForTest && panel.StoreForTest.Events.Single() == savedEvent,
+                    $"{key} on calendar Cancel discards changes without saving the event");
+            }
+            panel.EditEventForTest(savedEvent); title.Text = "Saved through button Enter";
+            check(save.Focus(), "Calendar Save receives native keyboard focus");
+            SendKey(save, Key.Enter);
+            check(!panel.EventEditorVisibleForTest && panel.StoreForTest.Events.Single().Title == "Saved through button Enter",
+                "Enter on calendar Save retains the native button action");
+            panel.EditEventForTest(panel.StoreForTest.Events.Single()); title.Text = "Saved through field Enter";
+            check(title.Focus(), "Calendar title receives native keyboard focus");
+            SendKey(title, Key.Enter);
+            check(!panel.EventEditorVisibleForTest && panel.StoreForTest.Events.Single().Title == "Saved through field Enter",
+                "Enter in a calendar text field retains the editor save shortcut");
+            var beforeNotes = panel.StoreForTest.Events.Single();
+            panel.EditEventForTest(beforeNotes); title.Text = "Unsaved note draft";
+            check(notes.Focus(), "Calendar notes receive native keyboard focus");
+            var noteEnter = new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(window), 0, Key.Enter)
+                { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+            notes.RaiseEvent(noteEnter);
+            check(!noteEnter.Handled && panel.EventEditorVisibleForTest && panel.StoreForTest.Events.Single() == beforeNotes,
+                "Unmodified Enter in calendar notes remains available for a newline without saving");
+            SendKey(notes, Key.Escape);
             var multiDay = panel.StoreForTest.AddEvent("Three days", OrganizerCalendar.LocalInstant(new DateOnly(2027, 3, 12), TimeOnly.MinValue), 4320, true);
             panel.EditEventForTest(multiDay);
             ((TextBox)panel.FindName("EventTitleBox")).Text = "Edited three days";
@@ -208,5 +243,80 @@ internal static class OrganizerVerification
             }
         }
         finally { window.Close(); }
+
+        var rollbackDirectory = Path.Combine(directory, "ui-write-rollback");
+        var rollbackStore = new OrganizerStore(rollbackDirectory);
+        var rollbackReminder = rollbackStore.AddReminder("Commit rollback fixture");
+        using var rollbackPanel = new OrganizerPanel(rollbackStore);
+        var rollbackWindow = new Window { Width = 610, Height = 325, ShowInTaskbar = false, Content = rollbackPanel,
+            Background = System.Windows.Media.Brushes.Black };
+        var blockedTemporary = Path.Combine(rollbackDirectory, "organizer.json.tmp");
+        var failures = 0;
+        rollbackPanel.Notification += (_, message) => { if (message.Contains("Could not save", StringComparison.Ordinal)) failures++; };
+        try
+        {
+            rollbackWindow.Show(); rollbackPanel.ShowTools(); rollbackPanel.SelectToolForTest("reminders");
+            rollbackWindow.UpdateLayout();
+            var reminderCheck = Descendants<CheckBox>((ItemsControl)rollbackPanel.FindName("ReminderItems")).Single();
+            var originalData = File.ReadAllText(Path.Combine(rollbackDirectory, "organizer.json"));
+            Directory.CreateDirectory(blockedTemporary);
+            check(reminderCheck.Focus(), "Reminder completion receives native keyboard focus");
+            SendKey(reminderCheck, Key.Space);
+            check(reminderCheck.IsChecked == false && !rollbackStore.Reminders.Single().Completed && failures == 1
+                && System.Windows.Data.BindingOperations.IsDataBound(reminderCheck, CheckBox.IsCheckedProperty),
+                "A refused reminder commit restores the native checkbox and preserves its binding");
+            check(File.ReadAllText(Path.Combine(rollbackDirectory, "organizer.json")) == originalData,
+                "A refused reminder commit leaves persisted organizer data unchanged");
+            Directory.Delete(blockedTemporary);
+            SendKey(reminderCheck, Key.Space);
+            rollbackWindow.UpdateLayout();
+            check(rollbackStore.Reminders.Single().Completed
+                && Descendants<CheckBox>((ItemsControl)rollbackPanel.FindName("ReminderItems")).Single().IsChecked == true
+                && new OrganizerStore(rollbackDirectory).Reminders.Single().Completed,
+                "Reminder completion succeeds and displays the saved state after retry");
+
+            rollbackPanel.SelectToolForTest("clocks"); rollbackWindow.UpdateLayout();
+            var city = Descendants<ComboBox>((FrameworkElement)rollbackPanel.FindName("ClockCards")).First();
+            var confirmedCity = rollbackStore.ClockZoneIds[1];
+            var nextCity = WorldClockChoice.All.First(choice => choice.Id != confirmedCity).Id;
+            originalData = File.ReadAllText(Path.Combine(rollbackDirectory, "organizer.json"));
+            Directory.CreateDirectory(blockedTemporary);
+            city.SelectedValue = nextCity;
+            check(Equals(city.SelectedValue, confirmedCity) && rollbackStore.ClockZoneIds[1] == confirmedCity && failures == 2,
+                "A refused world-clock commit immediately restores the confirmed selected city");
+            check(File.ReadAllText(Path.Combine(rollbackDirectory, "organizer.json")) == originalData,
+                "A refused world-clock commit leaves persisted organizer data unchanged");
+            Directory.Delete(blockedTemporary);
+            city.SelectedValue = nextCity;
+            check(Equals(city.SelectedValue, nextCity) && rollbackStore.ClockZoneIds[1] == nextCity
+                && new OrganizerStore(rollbackDirectory).ClockZoneIds[1] == nextCity && failures == 2,
+                "World-clock selection retries successfully without recursive error notifications");
+        }
+        finally
+        {
+            rollbackWindow.Close();
+            if (Directory.Exists(blockedTemporary)) Directory.Delete(blockedTemporary);
+        }
+
+        static System.Collections.Generic.IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+        {
+            for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++)
+            {
+                var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+                if (child is T match) yield return match;
+                foreach (var descendant in Descendants<T>(child)) yield return descendant;
+            }
+        }
+
+        static void SendKey(UIElement target, Key key)
+        {
+            var source = PresentationSource.FromVisual(target);
+            var preview = new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, key)
+                { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+            target.RaiseEvent(preview);
+            if (preview.Handled) return;
+            target.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, key) { RoutedEvent = Keyboard.KeyDownEvent });
+            target.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, key) { RoutedEvent = Keyboard.KeyUpEvent });
+        }
     }
 }

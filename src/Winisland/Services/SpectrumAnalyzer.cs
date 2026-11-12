@@ -16,7 +16,7 @@ internal sealed class SpectrumAnalyzer
     private readonly Complex[] _fftLeft = new Complex[Size], _fftRight = new Complex[Size];
     private readonly float[] _bands = new float[BandCount];
     private readonly object _gate = new();
-    private readonly int _sampleRate;
+    private readonly (int First, int Last)[] _bins = new (int, int)[BandCount];
     private int _position, _pending;
     private long _updatedAt;
 
@@ -27,8 +27,10 @@ internal sealed class SpectrumAnalyzer
 
     internal SpectrumAnalyzer(int sampleRate)
     {
-        _sampleRate = sampleRate;
         for (var i = 0; i < Size; i++) _window[i] = (float)(0.5 - 0.5 * Math.Cos(2 * Math.PI * i / (Size - 1)));
+        for (var band = 0; band < BandCount; band++)
+            _bins[band] = (Math.Max(1, (int)Math.Ceiling(Edges[band] * Size / sampleRate)),
+                Math.Min(Size / 2, (int)Math.Ceiling(Edges[band + 1] * Size / sampleRate)));
     }
 
     internal void Push(float left, float right)
@@ -50,8 +52,7 @@ internal sealed class SpectrumAnalyzer
         {
             for (var band = 0; band < BandCount; band++)
             {
-                var first = Math.Max(1, (int)Math.Ceiling(Edges[band] * Size / _sampleRate));
-                var last = Math.Min(Size / 2, (int)Math.Ceiling(Edges[band + 1] * Size / _sampleRate));
+                var (first, last) = _bins[band];
                 double power = 0;
                 for (var bin = first; bin < last; bin++)
                 {

@@ -1,0 +1,90 @@
+<UserControl x:Class="Winisland.Controls.DynamicIslandMenu"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:controls="clr-namespace:Winisland.Controls"
+ Height="{x:Static controls:DynamicIslandMetrics.MenuHeight}" FontFamily="{StaticResource UiFont}"
+ Foreground="White" UseLayoutRounding="True" TextOptions.TextFormattingMode="Ideal"
+ AutomationProperties.Name="Dynamic Island activities" KeyboardNavigation.TabNavigation="Continue">
+ <UserControl.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="NotchStyles.xaml"/></ResourceDictionary.MergedDictionaries>
+   <Style x:Key="ActivityButton" TargetType="Button" BasedOn="{StaticResource NotchButton}">
+    <Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="0"/>
+    <Setter Property="Margin" Value="2"/><Setter Property="FontSize" Value="11"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+     <Grid Background="Transparent">
+      <Border x:Name="Tile" Background="{TemplateBinding Background}" CornerRadius="18"
+       controls:InteractionMotion.Enabled="{DynamicResource MotionEnabled}">
+       <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Border>
+      <Border x:Name="FocusRing" BorderBrush="{StaticResource KeyboardFocusBlue}" BorderThickness="1.5"
+       CornerRadius="18" Visibility="Collapsed" IsHitTestVisible="False"/>
+     </Grid>
+     <ControlTemplate.Triggers>
+      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tile" Property="Background" Value="#262628"/></Trigger>
+      <Trigger Property="IsPressed" Value="True"><Setter TargetName="Tile" Property="Opacity" Value="0.65"/></Trigger>
+      <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="FocusRing" Property="Visibility" Value="Visible"/></Trigger>
+      <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Tile" Property="Opacity" Value="0.28"/></Trigger>
+     </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+   </Style>
+   <Style x:Key="MenuGlyph" TargetType="controls:NotchIcon"><Setter Property="Width" Value="19"/><Setter Property="Height" Value="19"/><Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="Margin" Value="0,0,0,4"/></Style>
+   <Style x:Key="MenuCaption" TargetType="TextBlock"><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="Medium"/><Setter Property="HorizontalAlignment" Value="Center"/></Style>
+  </ResourceDictionary>
+ </UserControl.Resources>
+ <!-- One housing: the parent draws and clips the continuous black contour. -->
+ <Grid Margin="20,16,20,16">
+  <Grid.RowDefinitions><RowDefinition Height="36"/><RowDefinition Height="88"/><RowDefinition Height="4"/><RowDefinition Height="44"/></Grid.RowDefinitions>
+  <Grid Margin="8,0,0,0">
+   <TextBlock Text="Activities" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
+   <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,-4,-4,-4">
+   <Button x:Name="SetupButton" Style="{StaticResource NotchPlaybackButton}" Width="44" Height="44" Click="OnSetupClick" ToolTip="Player setup" AutomationProperties.Name="Player setup">
+    <Grid Width="22" Height="22"><controls:NotchIcon Kind="Music" Width="17" Height="17" Foreground="#99FFFFFF" HorizontalAlignment="Left" VerticalAlignment="Top"/><controls:NotchIcon Kind="Settings" Width="11" Height="11" HorizontalAlignment="Right" VerticalAlignment="Bottom"/></Grid>
+   </Button>
+   <Button x:Name="PinButton" Style="{StaticResource NotchPlaybackButton}" Width="44" Height="44" Click="OnPinClick" ToolTip="Keep island open" AutomationProperties.Name="Keep island open">
+    <controls:NotchIcon x:Name="PinGlyph" Kind="Pin" Width="17" Height="17" Foreground="#99FFFFFF"/>
+   </Button>
+   <Button x:Name="BackButton" Style="{StaticResource NotchPlaybackButton}" Width="44" Height="44"
+    Click="OnBackClick" ToolTip="Return to activity · Esc" AutomationProperties.Name="Return to activity">
+    <controls:NotchIcon Kind="Close" Width="17" Height="17" Foreground="#99FFFFFF"/>
+   </Button>
+   </StackPanel>
+  </Grid>
+  <UniformGrid x:Name="Activities" Grid.Row="1" Columns="4" Rows="2" PreviewKeyDown="OnActivityKeyDown">
+   <Button x:Name="MusicButton" Tag="music" Style="{StaticResource ActivityButton}" Click="OnActivityClick" ToolTip="Now playing · Ctrl+1" AutomationProperties.Name="Now playing">
+    <StackPanel><controls:NotchIcon Kind="Music" Style="{StaticResource MenuGlyph}" Foreground="#FF6482"/><TextBlock Text="Playing" Style="{StaticResource MenuCaption}"/></StackPanel>
+   </Button>
+   <Button x:Name="FilesButton" Tag="files" Style="{StaticResource ActivityButton}" Click="OnActivityClick" ToolTip="File shelf · Ctrl+2" AutomationProperties.Name="File shelf">
+    <StackPanel><controls:NotchIcon Kind="Folder" Style="{StaticResource MenuGlyph}" Foreground="#64D2FF"/><TextBlock Text="Files" Style="{StaticResource MenuCaption}"/></StackPanel>
+   </Button>
+   <Button x:Name="FocusButton" Tag="focus" Style="{StaticResource ActivityButton}" Click="OnActivityClick" ToolTip="Focus timer · Ctrl+3" AutomationProperties.Name="Focus timer">
+    <StackPanel><controls:NotchIcon Kind="Timer" Style="{StaticResource MenuGlyph}" Foreground="{StaticResource FocusOrange}"/><TextBlock Text="Focus" Style="{StaticResource MenuCaption}"/></StackPanel>
+   </Button>
+   <Button x:Name="CalendarButton" Tag="calendar" Style="{StaticResource ActivityButton}" Click="OnActivityClick" ToolTip="Calendar · Ctrl+4" AutomationProperties.Name="Calendar">
+    <StackPanel><controls:NotchIcon Kind="Calendar" Style="{StaticResource MenuGlyph}" Foreground="#FF6961"/><TextBlock Text="Calendar" Style="{StaticResource MenuCaption}"/></StackPanel>
+   </Button>
+   <Button x:Name="ToolsButton" Tag="tools" Style="{StaticResource ActivityButton}" Click="OnActivityClick" ToolTip="Notes, reminders, clocks and stopwatch · Ctrl+5" AutomationProperties.Name="Tools">
+    <StackPanel><controls:NotchIcon Kind="Grid" Style="{StaticResource MenuGlyph}" Foreground="#FFD60A"/><TextBlock Text="Tools" Style="{StaticResource MenuCaption}"/></StackPanel>
+   </Button>
+   <Button x:Name="ControlsButton" Tag="controls" Style="{StaticResource ActivityButton}" Click="OnActivityClick" ToolTip="Control Center · Ctrl+6" AutomationProperties.Name="Control Center">
+    <StackPanel><controls:NotchIcon Kind="Controls" Style="{StaticResource MenuGlyph}" Foreground="#BF8AF3"/><TextBlock Text="Controls" Style="{StaticResource MenuCaption}"/></StackPanel>
+   </Button>
+   <Button x:Name="UpdatesButton" Tag="updates" Style="{StaticResource ActivityButton}" Click="OnActivityClick" ToolTip="Software update · Ctrl+7" AutomationProperties.Name="Software update">
+    <StackPanel><controls:NotchIcon Kind="Download" Style="{StaticResource MenuGlyph}" Foreground="{StaticResource ActivityBlue}"/><TextBlock Text="Updates" Style="{StaticResource MenuCaption}"/></StackPanel>
+   </Button>
+   <Button x:Name="SettingsButton" Tag="settings" Style="{StaticResource ActivityButton}" Click="OnActivityClick" ToolTip="Settings · Ctrl+Alt+S" AutomationProperties.Name="Settings">
+    <StackPanel><controls:NotchIcon Kind="Settings" Style="{StaticResource MenuGlyph}" Foreground="#AEAEB2"/><TextBlock Text="Settings" Style="{StaticResource MenuCaption}"/></StackPanel>
+   </Button>
+  </UniformGrid>
+  <Border Grid.Row="2" Height="1" Margin="8,0" VerticalAlignment="Center" Background="#26FFFFFF"/>
+  <Grid Grid.Row="3">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="44"/><ColumnDefinition/><ColumnDefinition Width="44"/></Grid.ColumnDefinitions>
+   <Button x:Name="MuteButton" Style="{StaticResource NotchPlaybackButton}" Width="44" Height="44" Click="OnMuteClick" AutomationProperties.Name="Mute player">
+    <controls:NotchIcon x:Name="VolumeGlyph" Kind="Speaker" Width="19" Height="19"/>
+   </Button>
+   <controls:VolumeSlider x:Name="IslandVolumeSlider" Grid.Column="1" Style="{StaticResource VolumeSliderStyle}" Height="44" Minimum="0" Maximum="100"
+    ValueChanged="OnVolumeChanged" AutomationProperties.Name="Player volume" AutomationProperties.HelpText="Adjust the active player's volume using the arrow keys, scroll wheel, or slider."/>
+   <TextBlock x:Name="VolumeLabel" Grid.Column="2" Text="—" FontSize="11" FontWeight="Medium" Foreground="#99FFFFFF" Typography.NumeralAlignment="Tabular" VerticalAlignment="Center" TextAlignment="Right" Margin="0,0,8,0"/>
+  </Grid>
+ </Grid>
+</UserControl>

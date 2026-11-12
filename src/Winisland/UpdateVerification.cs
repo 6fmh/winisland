@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -13,8 +14,12 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Navigation;
 using System.Xml.Linq;
 using Winisland.Controls;
 using Winisland.Services;
@@ -28,7 +33,7 @@ internal static class UpdateVerification
     private static string Hash => Convert.ToHexString(SHA256.HashData(Payload)).ToLowerInvariant();
     private static string InstallerName(string version, string runtime) => $"Winisland-Setup-{version}-{runtime}.exe";
     private static byte[] Checksum(string version, string runtime) => Encoding.UTF8.GetBytes($"{Hash}  {InstallerName(version, runtime)}\n");
-    private static string ReleaseJson(string version = VersionText, string? runtime = null)
+    private static string ReleaseJson(string version = VersionText, string? runtime = null, string? notes = null)
     {
         runtime ??= GitHubReleaseClient.Runtime;
         var name = InstallerName(version, runtime);
@@ -36,7 +41,7 @@ internal static class UpdateVerification
             browser_download_url = $"https://github.com/6fmh/winisland/releases/download/v{version}/{filename}", size = bytes.Length,
             digest = "sha256:" + Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant() };
         return JsonSerializer.Serialize(new { tag_name = "v" + version, draft = false, prerelease = false,
-            body = "A little better, every release.\n\nFaster startup and improvements to your notch.",
+            body = notes ?? "A little better, every release.\n\nFaster startup and improvements to your notch.",
             assets = new[] { Asset(name, Payload), Asset(name + ".sha256", Checksum(version, runtime)) } });
     }
     private sealed class Fixture : HttpMessageHandler
@@ -44,17 +49,22 @@ internal static class UpdateVerification
         internal string Metadata = ReleaseJson();
         internal byte[] Bytes = Payload;
         internal bool Pause, Missing;
+        internal bool FailCheck;
+        internal TaskCompletionSource<bool>? CheckGate;
         internal readonly List<string> Requests = new();
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
         {
             Requests.Add(request.RequestUri!.AbsoluteUri);
             if (request.RequestUri == GitHubReleaseClient.LatestReleaseUrl)
-                return Task.FromResult(new HttpResponseMessage(Missing ? HttpStatusCode.NotFound : HttpStatusCode.OK)
-                    { Content = new StringContent(Metadata, Encoding.UTF8, "application/json") });
+            {
+                if (CheckGate is not null) await CheckGate.Task.WaitAsync(cancellation);
+                return new HttpResponseMessage(FailCheck ? HttpStatusCode.ServiceUnavailable : Missing ? HttpStatusCode.NotFound : HttpStatusCode.OK)
+                    { Content = new StringContent(Metadata, Encoding.UTF8, "application/json") };
+            }
             if (request.RequestUri.AbsolutePath.EndsWith(".sha256", StringComparison.Ordinal))
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Checksum(VersionText, GitHubReleaseClient.Runtime)) });
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-                { Content = Pause ? new StreamContent(new PausingStream(Bytes)) : new ByteArrayContent(Bytes) });
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Checksum(VersionText, GitHubReleaseClient.Runtime)) };
+            return new HttpResponseMessage(HttpStatusCode.OK)
+                { Content = Pause ? new StreamContent(new PausingStream(Bytes)) : new ByteArrayContent(Bytes) };
         }
     }
     private sealed class PausingStream : MemoryStream
@@ -102,7 +112,7 @@ internal static class UpdateVerification
             _ => throw new InvalidOperationException("Missing release should not install")))
         {
             await service.CheckAsync();
-            check(!service.IsBusy && !service.HasUpdate && service.Message.Contains("up to date"), "A repository without a published release completes its check without an error");
+            check(!service.IsBusy && !service.HasUpdate && service.State == UpdateState.UpToDate, "A repository without a published release completes its check without an error");
         }
         var tampered = Payload.ToArray(); tampered[^1] ^= 1;
         var tamperFixture = new Fixture { Bytes = tampered };
@@ -174,6 +184,60 @@ internal static class UpdateVerification
         }
         finally { notch.CloseForShutdown(); settings.Update(saved); }
 
+        await VerifyPresentationAsync(app, output, settings, media, audio, focus, volume, check);
+
+        // Exercise both native appearances with a newer stable release ready in
+        // the fixture. A private beta must never ask for it or show its badge.
+        foreach (var dynamicIsland in new[] { false, true })
+        {
+            var privateFixture = new Fixture();
+            var privateInstalls = 0;
+            using var privateUpdates = new UpdateService(app.Dispatcher, new GitHubReleaseClient(new HttpClient(privateFixture)),
+                new Version(0, 4, 0), fixtureDirectory, _ => { privateInstalls++; return Task.CompletedTask; }, updatesEnabled: false);
+            settings.Update(saved with { UseDynamicIsland = dynamicIsland, ReducedMotion = true, HideInFullscreen = false, ShowLiveActivity = false });
+            var privateNotch = new NotchWindow(settings, media, audio, focus, new FileShelf(), playerVolume: volume, updates: privateUpdates);
+            try
+            {
+                privateNotch.StopPollingForTest(); privateNotch.Show(); privateNotch.UpdateLayout();
+                privateUpdates.StartAutomaticChecks();
+                await privateUpdates.CheckAsync(); await privateUpdates.InstallAsync();
+                check(typeof(UpdateService).GetField("_automatic", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(privateUpdates) is null
+                    && privateFixture.Requests.Count == 0 && privateInstalls == 0 && !privateUpdates.IsBusy && !privateUpdates.HasUpdate
+                    && !privateUpdates.CanCheck && !privateUpdates.CanInstall,
+                    "Private beta schedules no automatic checks and makes no network or installer calls, even when a newer public release exists");
+                check(((FrameworkElement)privateNotch.FindName("UpdateTab")).Visibility == Visibility.Collapsed
+                    && ((FrameworkElement)privateNotch.FindName("UpdateBadge")).Visibility == Visibility.Collapsed
+                    && ((TextBlock)privateNotch.FindName("CompactLabel")).Text != "Update",
+                    $"Private beta hides the public Update indicator and tab in {(dynamicIsland ? "Dynamic Island" : "MacBook notch")} appearance");
+                privateNotch.OpenUpdates(); privateNotch.UpdateLayout();
+                ((Button)privateNotch.FindName("CheckUpdatesButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                ((Button)privateNotch.FindName("InstallUpdateButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                await Task.Delay(40);
+                check(((FrameworkElement)privateNotch.FindName("UpdatePanel")).IsVisible
+                    && !((Button)privateNotch.FindName("CheckUpdatesButton")).IsEnabled
+                    && !((Button)privateNotch.FindName("InstallUpdateButton")).IsEnabled
+                    && privateUpdates.Message.Contains("private beta") && privateFixture.Requests.Count == 0 && privateInstalls == 0,
+                    "Opening Software update on a private beta explains disabled public updates and cannot check or install through the actual buttons");
+                Capture(privateNotch, Path.Combine(output, dynamicIsland ? "private-beta-island-updates.png" : "private-beta-notch-updates.png"));
+            }
+            finally { privateNotch.CloseForShutdown(); settings.Update(saved); }
+        }
+
+        var buildMetadata = typeof(App).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .Single(attribute => attribute.Key == "WinislandPrivateBuild");
+        using (var productionUpdates = new UpdateService(app.Dispatcher))
+        {
+            check(bool.TryParse(buildMetadata.Value, out var privateBuild) && privateBuild == UpdateService.IsPrivateBuild
+                && productionUpdates.CanCheck == !privateBuild,
+                $"Production updater honors embedded private-build metadata ({buildMetadata.Value}) without changing settings or the version");
+            if (UpdateService.IsPrivateBuild)
+            {
+                productionUpdates.StartAutomaticChecks(); await productionUpdates.CheckAsync(); await productionUpdates.InstallAsync();
+                check(!productionUpdates.HasUpdate && !productionUpdates.CanInstall && !productionUpdates.IsBusy
+                    && productionUpdates.Message.Contains("private beta"), "The actual private-build production updater remains disabled on all entry points");
+            }
+        }
+
         var cache = Path.Combine(SettingsStore.DirectoryPath, "updates", Guid.NewGuid().ToString("N"));
         var application = Environment.ProcessPath!;
         var plan = new UpdatePlan(new UpdatePackage(Path.Combine(cache, InstallerName(VersionText, GitHubReleaseClient.Runtime)), Hash, VersionText),
@@ -209,10 +273,12 @@ internal static class UpdateVerification
         {
             File.WriteAllText(outcomePath, "[]");
             using (var service = new UpdateService(app.Dispatcher))
-                check(!service.IsBusy && service.Message.Contains("Ready"), "A corrupt update-outcome cache never blocks app startup");
+                check(!service.IsBusy && (UpdateService.IsPrivateBuild ? service.Message.Contains("private beta") : service.Message.Contains("Ready")),
+                    "A corrupt update-outcome cache never blocks app startup");
             File.WriteAllText(outcomePath, JsonSerializer.Serialize(new { success = false, message = "Setup could not finish. Try again." }));
             using (var service = new UpdateService(app.Dispatcher))
-                check(service.Message == "Setup could not finish. Try again.", "A failed helper installation remains visible as inline retry guidance on the next launch");
+                check(UpdateService.IsPrivateBuild ? service.Message.Contains("private beta") : service.Message == "Setup could not finish. Try again.",
+                    "Public builds retain failed-install retry guidance; private builds keep their disabled-update explanation");
         }
         finally { if (oldOutcome is null) File.Delete(outcomePath); else File.WriteAllBytes(outcomePath, oldOutcome); }
         if (expectedVersion is not null)
@@ -227,6 +293,272 @@ internal static class UpdateVerification
             await File.WriteAllTextAsync(Path.Combine(output, "release-verification.json"), JsonSerializer.Serialize(new
             { repository = GitHubReleaseClient.Repository, release.Tag, installer = release.Installer.Url, package.Sha256, bytes = new FileInfo(package.InstallerPath).Length, installed = false }, new JsonSerializerOptions { WriteIndented = true }));
         }
+    }
+    private const string MarkdownNotes = """
+        ## Improvements
+        - **Media controls** stay close while you read what's new.
+        - Longer song titles and device names wrap cleanly without covering the update controls. This entry deliberately spans multiple lines to check that the bullet and its continuation remain aligned.
+          - *Reduced motion* keeps transitions calm.
+        - Notifications return to the compact notch after you dismiss them.
+
+        ## Fixes
+        1. Restore the notch after display changes and sleep.
+        2. Keep your saved settings when installing an update.
+        3. Use `Ctrl+7` to return to Software update.
+
+        ## More information
+        Read the [release guide](https://github.com/6fmh/winisland/releases/tag/v1.2.3) for the full details.
+
+        ### Keyboard and accessibility
+        Controls have visible keyboard focus. Status updates remain readable while the changelog scrolls, and the update button stays available below the notes.
+
+        ```text
+        Winisland-Setup-1.2.3-win-x64.exe
+        ```
+        """;
+
+    private static async Task VerifyPresentationAsync(App app, string output, SettingsStore settings, MediaService media,
+        AudioService audio, FocusTimer focus, PlayerVolumeService volume, Action<bool, string> check)
+    {
+        BackgroundVerification.RequirePrivateDesktop();
+        var folder = Path.Combine(output, "update-ui");
+        Directory.CreateDirectory(folder);
+        var saved = settings.Current;
+        var observations = new List<object>();
+        var checks = new List<object>();
+        var passed = true;
+        var completed = false;
+        void Verify(bool condition, string description)
+        { passed &= condition; checks.Add(new { passed = condition, description }); check(condition, description); }
+        try
+        {
+            foreach (var dynamicIsland in new[] { false, true })
+            {
+                var appearance = dynamicIsland ? "island" : "notch";
+                var fixture = new Fixture { FailCheck = true, CheckGate = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+                var installGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var installs = 0;
+                using var service = new UpdateService(app.Dispatcher, new GitHubReleaseClient(new HttpClient(fixture)), new Version(0, 4, 0),
+                    Path.Combine(folder, appearance + "-downloads"), async _ => { installs++; await installGate.Task; });
+                settings.Update(saved with { UseDynamicIsland = dynamicIsland, ReducedMotion = true, HideInFullscreen = false,
+                    ExpandOnHover = false, ShowLiveActivity = false, NotchWidth = 190, NotchHeight = 32 });
+                var window = new NotchWindow(settings, media, audio, focus, new FileShelf(), playerVolume: volume, updates: service);
+                var links = new List<Uri>();
+                window.OpenUpdateLinkForTest = links.Add;
+                try
+                {
+                    window.StopPollingForTest(); window.Show(); window.OpenUpdates();
+                    var install = (Button)window.FindName("InstallUpdateButton");
+                    var cancel = (Button)window.FindName("CancelUpdateButton");
+                    var recheck = (Button)window.FindName("CheckUpdatesButton");
+                    var notes = (ReleaseNotesView)window.FindName("UpdateNotes");
+                    var title = (TextBlock)window.FindName("UpdateTitle");
+                    var status = (TextBlock)window.FindName("UpdateStatus");
+                    var surface = (FrameworkElement)window.FindName("Island");
+                    await Settle();
+                    Verify(service.State == UpdateState.Checking && !recheck.IsEnabled && !install.IsVisible
+                        && status.Text.Contains("Checking") && ((FrameworkElement)window.FindName("UpdateNotesSection")).Visibility == Visibility.Collapsed,
+                        $"{appearance}: a pending real check shows stable loading feedback without old notes or an install offer");
+                    CaptureState("checking");
+                    fixture.CheckGate.SetResult(true);
+                    await WaitUntil(() => !service.IsBusy); await Settle();
+                    Verify(service.State == UpdateState.Error && recheck.IsEnabled && !install.IsVisible
+                        && status.Text.Contains("connection") && Contrast(status.Foreground) >= 4.5,
+                        $"{appearance}: a failed check wraps its readable error and leaves the real retry action enabled");
+                    CaptureState("error");
+                    fixture.FailCheck = false; fixture.Missing = true;
+                    recheck.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    await WaitUntil(() => service.State == UpdateState.UpToDate); await Settle();
+                    Verify(title.Text.Contains("up to date") && !install.IsVisible && recheck.IsEnabled
+                        && Math.Abs(surface.ActualHeight - NotchMetrics.UpdateCompactHeight - (dynamicIsland ? 16 : 0)) < .5,
+                        $"{appearance}: no available release produces the shorter, up-to-date presentation with no install action");
+                    CaptureState("up-to-date");
+                    fixture.Missing = false; fixture.Metadata = ReleaseJson(notes: MarkdownNotes);
+                    recheck.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    await WaitUntil(() => service.HasUpdate && !service.IsBusy); await Settle();
+                    var text = new TextRange(notes.Document.ContentStart, notes.Document.ContentEnd).Text;
+                    var inlines = DocumentInlines(notes.Document.Blocks).ToArray();
+                    Verify(title.Text == "Winisland 1.2.3" && ((TextBlock)window.FindName("UpdateSubtitle")).Text.Contains("Installed 0.4.0")
+                        && install.IsVisible && install.IsEnabled && notes.IsReadOnly && notes.IsDocumentEnabled
+                        && text.Contains("Media controls") && text.Contains("Ctrl+7") && !text.Contains("**") && !text.Contains("## Improvements")
+                        && notes.Document.Blocks.OfType<System.Windows.Documents.List>().Any(list => list.MarkerStyle == TextMarkerStyle.Decimal)
+                        && inlines.OfType<Span>().Any(span => span.FontWeight == FontWeights.SemiBold)
+                        && inlines.OfType<Run>().Any(run => run.FontFamily.Source == "Consolas"),
+                        $"{appearance}: the native changelog renders headings, emphasis, hanging lists and code as readable selectable text");
+                    Verify(Contrast(notes.Foreground) >= 4.5 && notes.FontSize >= 13 && install.ActualHeight >= 44
+                        && recheck.ActualHeight >= 44 && ((Button)window.FindName("FullReleaseNotesButton")).ActualHeight >= 44
+                        && AutomationProperties.GetLiveSetting(status) == AutomationLiveSetting.Polite,
+                        $"{appearance}: notes contrast, text size, action hit regions and polite status announcements meet the design contract");
+                    var pinned = Bounds(install, window);
+                    Verify(notes.ExtentHeight > notes.ViewportHeight + 10 && notes.ViewportHeight >= 80,
+                        $"{appearance}: long notes have a usable scroll viewport");
+                    notes.ScrollToEnd(); await Settle();
+                    Verify(notes.VerticalOffset > 0 && Bounds(install, window) == pinned && install.IsVisible,
+                        $"{appearance}: scrolling long release notes leaves the update action fixed and visible");
+                    CaptureState("scrolled");
+                    notes.ScrollToHome(); await Settle();
+                    var scrollbar = VisualDescendants<ScrollBar>(notes).Single(bar => bar.Orientation == Orientation.Vertical && bar.IsVisible);
+                    scrollbar.ApplyTemplate();
+                    var track = (Track)scrollbar.Template.FindName("PART_Track", scrollbar);
+                    observations.Add(new { appearance, stage = "scrollbar", width = scrollbar.ActualWidth, requestedWidth = scrollbar.Width,
+                        minimumWidth = scrollbar.MinWidth, thumbMinimum = track.Thumb.MinHeight,
+                        source = DependencyPropertyHelper.GetValueSource(scrollbar, FrameworkElement.WidthProperty).BaseValueSource.ToString() });
+                    Verify(scrollbar.ActualWidth <= 8 && track.Thumb.MinHeight >= 24,
+                        $"{appearance}: the notes use a thin dark native scrollbar with a usable thumb");
+                    track.Thumb.RaiseEvent(new DragStartedEventArgs(0, 0) { RoutedEvent = Thumb.DragStartedEvent });
+                    track.Thumb.RaiseEvent(new DragDeltaEventArgs(0, 24) { RoutedEvent = Thumb.DragDeltaEvent });
+                    track.Thumb.RaiseEvent(new DragCompletedEventArgs(0, 24, false) { RoutedEvent = Thumb.DragCompletedEvent });
+                    await Settle();
+                    Verify(notes.VerticalOffset > 0 && Bounds(install, window) == pinned,
+                        $"{appearance}: actual control-local thumb dragging scrolls the notes while preserving the fixed action");
+                    notes.ScrollToHome(); await Settle();
+                    window.Activate(); notes.Focus();
+                    var moved = notes.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+                    Verify(moved && ReferenceEquals(Keyboard.FocusedElement, recheck),
+                        $"{appearance}: Tab traverses from the notes to the update controls");
+                    install.Focus(); install.ApplyTemplate();
+                    var focusBorder = (Border)install.Template.FindName("UpdateButtonSurface", install);
+                    Verify(install.IsKeyboardFocused && focusBorder.BorderBrush is SolidColorBrush { Color: { B: 255, G: 145, R: 0 } },
+                        $"{appearance}: the focused install action has the visible blue keyboard outline");
+                    CaptureState("keyboard-focus");
+                    Keyboard.ClearFocus();
+                    foreach (var scale in new[] { 1.0, 1.25, 1.5, 2.0 })
+                    {
+                        var bounds = Bounds((FrameworkElement)window.FindName("UpdatePanel"), surface);
+                        var children = new FrameworkElement[] { (FrameworkElement)window.FindName("UpdateHeader"), notes, status, install, recheck };
+                        Verify(children.All(child => { var rect = Bounds(child, surface); return rect.Left >= 24 && rect.Right <= surface.ActualWidth - 24
+                                && rect.Top >= 32 && rect.Bottom <= surface.ActualHeight - 10; }),
+                            $"{appearance}: title, notes and pinned controls stay inset from the housing at {scale * 100:0}% raster DPI");
+                        var artifact = $"{appearance}-available-{scale * 100:0}.png";
+                        CaptureReview(window, Path.Combine(folder, artifact), scale);
+                        observations.Add(new { appearance, stage = "available", scale, artifact, width = surface.ActualWidth, height = surface.ActualHeight, bounds,
+                            notesViewport = notes.ViewportHeight, title = title.Text, status = status.Text });
+                    }
+                    var fullRelease = (Button)window.FindName("FullReleaseNotesButton");
+                    fullRelease.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    var link = inlines.OfType<Hyperlink>().Single();
+                    link.RaiseEvent(new RequestNavigateEventArgs(link.NavigateUri, "") { RoutedEvent = Hyperlink.RequestNavigateEvent });
+                    Verify(links.Count == 2 && links.All(uri => uri.AbsoluteUri == "https://github.com/6fmh/winisland/releases/tag/v1.2.3"),
+                        $"{appearance}: full-release and actual inline links route through the isolated local browser callback");
+                    window.OpenUpdateLinkForTest = _ => throw new InvalidOperationException("Fixture browser unavailable.");
+                    fullRelease.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Verify(status.Text.Contains("Couldn't open your browser"), $"{appearance}: a browser-open failure is reported inline");
+                    window.OpenUpdateLinkForTest = links.Add;
+                    recheck.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await WaitUntil(() => !service.IsBusy); await Settle();
+                    Verify(status.Text == service.Message && AutomationProperties.GetName(status) == service.Message,
+                        $"{appearance}: a later operation restores the live status bindings after a browser-open failure");
+                    fixture.Metadata = ReleaseJson(notes: MarkdownNotes + "\n\n" + new string('x', 6500));
+                    recheck.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await WaitUntil(() => !service.IsBusy); await Settle();
+                    Verify(service.NotesTruncated && ((FrameworkElement)window.FindName("UpdateNotesLimitHint")).IsVisible
+                        && fullRelease.IsVisible && fullRelease.IsEnabled,
+                        $"{appearance}: bounded release bodies clearly disclose the preview and retain the full-release link");
+                    CaptureState("partial");
+                    fixture.Metadata = ReleaseJson(notes: "");
+                    recheck.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await WaitUntil(() => !service.IsBusy); await Settle();
+                    Verify(service.HasUpdate && install.IsEnabled && new TextRange(notes.Document.ContentStart, notes.Document.ContentEnd).Text.Contains("No release notes"),
+                        $"{appearance}: missing release notes explain the gap while keeping the available update usable");
+                    CaptureState("missing-notes");
+                    fixture.Metadata = ReleaseJson(notes: MarkdownNotes + "\n\n[Local file](file:///C:/private.txt)\n\n![Remote image](https://example.com/image.png)");
+                    recheck.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await WaitUntil(() => !service.IsBusy); await Settle();
+                    Verify(DocumentInlines(notes.Document.Blocks).OfType<Hyperlink>().All(item => item.NavigateUri.Scheme == "https")
+                        && !DocumentInlines(notes.Document.Blocks).OfType<InlineUIContainer>().Any(),
+                        $"{appearance}: release text cannot create a file link or load a remote image into the document");
+                    fixture.Pause = true; notes.ScrollToVerticalOffset(40); await Settle();
+                    var document = notes.Document; var offset = notes.VerticalOffset;
+                    install.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    await WaitUntil(() => service.Progress > 0); await Settle();
+                    Verify(service.State == UpdateState.Downloading && cancel.IsVisible && cancel.ActualHeight >= 44
+                        && !install.IsEnabled && ((ProgressBar)window.FindName("UpdateProgress")).IsVisible
+                        && ReferenceEquals(document, notes.Document) && notes.VerticalOffset >= offset - .5,
+                        $"{appearance}: actual byte progress and Cancel appear without rebuilding or jumping the changelog");
+                    CaptureState("downloading");
+                    cancel.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    await WaitUntil(() => !service.IsBusy); await Settle();
+                    Verify(service.State == UpdateState.Canceled && install.IsEnabled && !cancel.IsVisible && status.Text.Contains("canceled"),
+                        $"{appearance}: cancel leaves a readable outcome and an enabled update retry");
+                    CaptureState("canceled");
+                    fixture.Pause = false;
+                    install.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    await WaitUntil(() => service.State == UpdateState.Installing); await Settle();
+                    Verify(installs == 1 && !install.IsEnabled && !cancel.IsVisible && !recheck.IsEnabled && status.Text.Contains("Installing"),
+                        $"{appearance}: verified installer handoff has explicit installing feedback and disables competing actions");
+                    CaptureState("installing");
+                    installGate.SetResult(true);
+                    await WaitUntil(() => service.State == UpdateState.Restarting && !service.IsBusy); await Settle();
+                    var requests = fixture.Requests.Count;
+                    install.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await service.CheckAsync();
+                    Verify(!install.IsEnabled && !recheck.IsEnabled && installs == 1 && fixture.Requests.Count == requests
+                        && install.Content.ToString() == "Restarting…",
+                        $"{appearance}: completed handoff clearly shows restarting and cannot begin another update or check");
+                    CaptureState("restarting");
+
+                    async Task Settle() { await Task.Delay(35); window.UpdateLayout(); }
+                    void CaptureState(string stage)
+                    {
+                        var artifact = $"{appearance}-{stage}.png";
+                        CaptureReview(window, Path.Combine(folder, artifact), 1);
+                        observations.Add(new { appearance, stage, artifact, state = service.State.ToString(), title = title.Text, status = status.Text,
+                            width = surface.ActualWidth, height = surface.ActualHeight, install = install.IsEnabled, check = recheck.IsEnabled });
+                    }
+                }
+                finally { installGate.TrySetResult(true); fixture.CheckGate?.TrySetResult(true); window.CloseForShutdown(); }
+            }
+            completed = true;
+        }
+        finally
+        {
+            settings.Update(saved);
+            await File.WriteAllTextAsync(Path.Combine(folder, "runtime.json"), JsonSerializer.Serialize(new
+            { passed = passed && completed, timestamp = DateTime.UtcNow, desktop = BackgroundVerification.CurrentDesktop, checks, observations }, new JsonSerializerOptions { WriteIndented = true }));
+        }
+    }
+
+    private static IEnumerable<Inline> DocumentInlines(BlockCollection blocks)
+    {
+        foreach (var block in blocks)
+            if (block is Paragraph paragraph)
+            { foreach (var inline in Walk(paragraph.Inlines)) yield return inline; }
+            else if (block is System.Windows.Documents.List list)
+                foreach (var item in list.ListItems)
+                    foreach (var inline in DocumentInlines(item.Blocks)) yield return inline;
+        static IEnumerable<Inline> Walk(InlineCollection inlines)
+        {
+            foreach (var inline in inlines)
+            { yield return inline; if (inline is Span span) foreach (var nested in Walk(span.Inlines)) yield return nested; }
+        }
+    }
+    private static IEnumerable<T> VisualDescendants<T>(DependencyObject owner) where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(owner); index++)
+        {
+            var child = VisualTreeHelper.GetChild(owner, index);
+            if (child is T match) yield return match;
+            foreach (var nested in VisualDescendants<T>(child)) yield return nested;
+        }
+    }
+    private static Rect Bounds(FrameworkElement element, Visual relative) => new(element.TranslatePoint(new Point(), (UIElement)relative), element.RenderSize);
+    private static double Contrast(Brush brush)
+    {
+        if (brush is not SolidColorBrush solid) return 0;
+        static double Linear(byte channel) { var value = channel / 255.0; return value <= .04045 ? value / 12.92 : Math.Pow((value + .055) / 1.055, 2.4); }
+        return (.2126 * Linear(solid.Color.R) + .7152 * Linear(solid.Color.G) + .0722 * Linear(solid.Color.B) + .05) / .05;
+    }
+    private static void CaptureReview(Window window, string path, double scale)
+    {
+        window.UpdateLayout();
+        var width = window.ActualWidth; var height = window.ActualHeight;
+        var native = new RenderTargetBitmap((int)Math.Ceiling(width * scale), (int)Math.Ceiling(height * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+        native.Render(window);
+        var drawing = new DrawingVisual();
+        using (var context = drawing.RenderOpen())
+        {
+            context.DrawRectangle(new SolidColorBrush(Color.FromRgb(174, 179, 187)), null, new Rect(0, 0, width, height));
+            context.DrawImage(native, new Rect(0, 0, width, height));
+        }
+        var bitmap = new RenderTargetBitmap(native.PixelWidth, native.PixelHeight, 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+        bitmap.Render(drawing);
+        var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = File.Create(path); encoder.Save(stream);
     }
     private static async Task WaitUntil(Func<bool> condition)
     {

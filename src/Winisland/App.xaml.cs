@@ -35,10 +35,6 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        if (BrowserNativeHost.IsHostInvocation(e.Args))
-        {
-            Shutdown(await BrowserNativeHost.RunAsync(e.Args)); return;
-        }
         if (e.Args.Length == 1 && e.Args[0] == "--unregister-browser-host")
         {
             try { BrowserIntegration.Unregister(Environment.ProcessPath!); Shutdown(0); }

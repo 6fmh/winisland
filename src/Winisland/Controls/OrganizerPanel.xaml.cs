@@ -37,8 +37,9 @@ public partial class OrganizerPanel : UserControl, IDisposable
     private int _editingAllDayDuration = 1440;
     private bool _initializing = true, _notesDirty, _disposed, _clockDropdownOpen, _dialogOpen;
     private static readonly Brush Red = FrozenBrush(0xFF, 0x45, 0x3A);
+    private static readonly Brush SelectedDayFill = FrozenBrush(0xD7, 0x00, 0x15);
     private static readonly Brush Muted = FrozenBrush(0x8A, 0x8A, 0x8E);
-    private static readonly Brush Inactive = FrozenBrush(0x55, 0x55, 0x5A);
+    private static readonly Brush Inactive = FrozenBrush(0x8A, 0x8A, 0x8E);
     private static readonly DependencyProperty TransitionEnabledProperty = DependencyProperty.Register(
         "TransitionEnabled", typeof(bool), typeof(OrganizerPanel),
         new FrameworkPropertyMetadata(true, (_, args) => { if (args.NewValue is false && _ is OrganizerPanel panel) panel.FinishTransitions(); }));
@@ -149,7 +150,7 @@ public partial class OrganizerPanel : UserControl, IDisposable
             view.Button.Tag = date; view.Button.IsEnabled = date.HasValue;
             view.Label.Text = date?.Day.ToString(CultureInfo.CurrentCulture) ?? "";
             var selected = date == _selectedDay;
-            view.Button.Background = selected ? Red : date == today ? FrozenBrush(0x37, 0x1D, 0x1D) : Brushes.Transparent;
+            view.Button.Background = selected ? SelectedDayFill : date == today ? FrozenBrush(0x37, 0x1D, 0x1D) : Brushes.Transparent;
             view.Label.Foreground = selected ? Brushes.White : date == today ? Red : date?.Month == _displayedMonth.Month ? Brushes.White : Inactive;
             view.Dot.Fill = selected ? Brushes.White : Red;
             view.Dot.Visibility = date.HasValue && _store.EventsOn(date.Value).Count > 0 ? Visibility.Visible : Visibility.Hidden;
@@ -201,7 +202,7 @@ public partial class OrganizerPanel : UserControl, IDisposable
     {
         _editingEventId = entry?.Id;
         _editingAllDayDuration = entry is { AllDay: true } ? entry.DurationMinutes : 1440;
-        if (entry is not null) SetSelectedDay(DateOnly.FromDateTime(entry.Start.LocalDateTime));
+        if (entry is not null) SetSelectedDay(DateOnly.FromDateTime(entry.AllDay ? entry.Start.DateTime : entry.Start.LocalDateTime));
         EventTitleBox.Text = entry?.Title ?? "";
         EventTimeBox.Text = entry?.Start.LocalDateTime.ToString("HH:mm", CultureInfo.InvariantCulture) ?? DateTime.Now.AddHours(1).ToString("HH:00", CultureInfo.InvariantCulture);
         EventDurationBox.Text = (entry?.DurationMinutes ?? 60).ToString(CultureInfo.InvariantCulture);
@@ -242,6 +243,9 @@ public partial class OrganizerPanel : UserControl, IDisposable
 
     private void OnEventEditorKeyDown(object sender, KeyEventArgs e)
     {
+        // Let focused buttons perform their own action. Enter on Cancel must
+        // never become the editor's save shortcut.
+        if (e.Key == Key.Enter && Keyboard.FocusedElement is System.Windows.Controls.Primitives.ButtonBase) return;
         if (e.Key == Key.Enter && ReferenceEquals(Keyboard.FocusedElement, EventNotesBox) && !Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) return;
         if (e.Key == Key.Enter) { OnSaveEvent(sender, e); e.Handled = true; }
         else if (e.Key == Key.Escape) { CloseEventEditor(); e.Handled = true; }
@@ -328,7 +332,11 @@ public partial class OrganizerPanel : UserControl, IDisposable
         ReminderCountLabel.Text = $"{reminders.Count(r => !r.Completed)} remaining";
     }
     private void OnReminderToggle(object sender, RoutedEventArgs e)
-    { if (((CheckBox)sender).Tag is ReminderEntry item) TryStoreAction(() => _store.ToggleReminder(item.Id)); }
+    {
+        if (sender is not CheckBox button || button.Tag is not ReminderEntry item) return;
+        if (!TryStoreAction(() => _store.ToggleReminder(item.Id)))
+            button.SetCurrentValue(CheckBox.IsCheckedProperty, _store.Reminders.FirstOrDefault(r => r.Id == item.Id)?.Completed ?? item.Completed);
+    }
     private void OnRemoveReminder(object sender, RoutedEventArgs e)
     { if (((Button)sender).Tag is ReminderEntry item) TryStoreAction(() => _store.RemoveReminder(item.Id)); }
     private void OnEditReminder(object sender, RoutedEventArgs e)
@@ -411,7 +419,11 @@ public partial class OrganizerPanel : UserControl, IDisposable
                     Style = (Style)FindResource("ClockChoice") };
                 cityChoice = choice;
                 System.Windows.Automation.AutomationProperties.SetName(choice, $"World clock city {i}");
-                choice.SelectionChanged += (_, _) => { if (choice.SelectedValue is string selected) TryStoreAction(() => _store.SetClockZone(index, selected)); };
+                choice.SelectionChanged += (_, _) =>
+                {
+                    if (choice.SelectedValue is string selected && !TryStoreAction(() => _store.SetClockZone(index, selected)))
+                        choice.SelectedValue = _store.ClockZoneIds[index];
+                };
                 choice.DropDownOpened += (_, _) => { _clockDropdownOpen = true; EditingChanged?.Invoke(this, EventArgs.Empty); };
                 choice.DropDownClosed += (_, _) => { _clockDropdownOpen = false; EditingChanged?.Invoke(this, EventArgs.Empty); };
                 grid.Children.Add(choice);
@@ -482,11 +494,11 @@ public partial class OrganizerPanel : UserControl, IDisposable
         { Notification?.Invoke(this, "That Windows shortcut is unavailable."); }
     }
 
-    private void TryStoreAction(Action action)
+    private bool TryStoreAction(Action action)
     {
-        try { action(); }
+        try { action(); return true; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-        { Notification?.Invoke(this, ex is ArgumentException ? ex.Message : "Could not save this change. Try again."); }
+        { Notification?.Invoke(this, ex is ArgumentException ? ex.Message : "Could not save this change. Try again."); return false; }
     }
 
     private void AnimateEntrance(FrameworkElement element)

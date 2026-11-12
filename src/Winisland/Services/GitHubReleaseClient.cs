@@ -14,7 +14,7 @@ using System.Runtime.InteropServices;
 namespace Winisland.Services;
 
 internal sealed record ReleaseAsset(string Name, Uri Url, long Size, string Digest);
-internal sealed record AppRelease(Version Version, string Tag, string Notes, ReleaseAsset Installer, ReleaseAsset Checksum);
+internal sealed record AppRelease(Version Version, string Tag, string Notes, ReleaseAsset Installer, ReleaseAsset Checksum, bool NotesTruncated = false);
 public sealed record UpdatePackage(string InstallerPath, string Sha256, string Version);
 
 internal sealed class GitHubReleaseClient : IDisposable
@@ -72,7 +72,7 @@ internal sealed class GitHubReleaseClient : IDisposable
         }
         var notes = Read(root, "body");
         return new(Normalize(version), tag, notes[..Math.Min(6000, notes.Length)],
-            Find(installerName, 512L * 1024 * 1024), Find(installerName + ".sha256", 4096));
+            Find(installerName, 512L * 1024 * 1024), Find(installerName + ".sha256", 4096), notes.Length > 6000);
     }
 
     internal async Task<UpdatePackage> DownloadAsync(AppRelease release, string directory, IProgress<double>? progress, CancellationToken cancellation)
@@ -106,6 +106,7 @@ internal sealed class GitHubReleaseClient : IDisposable
             using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true))
             {
                 var buffer = new byte[65536];
+                var latestProgress = progress is null ? null : new LatestProgress(progress);
                 long received = 0;
                 int count;
                 while ((count = await input.ReadAsync(buffer, cancellation).ConfigureAwait(false)) > 0)
@@ -114,7 +115,7 @@ internal sealed class GitHubReleaseClient : IDisposable
                     if (received > release.Installer.Size) throw new InvalidOperationException("The installer download exceeded its expected size.");
                     hash.AppendData(buffer, 0, count);
                     await file.WriteAsync(buffer.AsMemory(0, count), cancellation).ConfigureAwait(false);
-                    progress?.Report(100.0 * received / release.Installer.Size);
+                    latestProgress?.Report(100.0 * received / release.Installer.Size);
                 }
                 if (received != release.Installer.Size) throw new InvalidOperationException("The installer download is incomplete. Try again.");
                 await file.FlushAsync(cancellation).ConfigureAwait(false);

@@ -65,7 +65,7 @@
     <Setter Property="Width" Value="32"/><Setter Property="Height" Value="34"/><Setter Property="Cursor" Value="Hand"/>
     <Setter Property="FocusVisualStyle" Value="{StaticResource NotchFocus}"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox">
-     <Grid Background="Transparent"><Ellipse x:Name="Circle" Width="17" Height="17" Stroke="#55555A" StrokeThickness="1.4"/>
+     <Grid Background="Transparent"><Ellipse x:Name="Circle" Width="17" Height="17" Stroke="#8A8A8E" StrokeThickness="1.4"/>
       <Path x:Name="Tick" Data="M3,8 L7,12 L15,3" Width="11" Height="10" Stretch="Uniform" Stroke="Black" StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Visibility="Collapsed"/>
      </Grid><ControlTemplate.Triggers>
       <Trigger Property="IsChecked" Value="True"><Setter TargetName="Circle" Property="Fill" Value="{StaticResource ActivityBlue}"/><Setter TargetName="Circle" Property="Stroke" Value="{StaticResource ActivityBlue}"/><Setter TargetName="Tick" Property="Visibility" Value="Visible"/></Trigger>
@@ -77,7 +77,7 @@
     <Setter Property="Width" Value="90"/><Setter Property="Height" Value="28"/>
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox">
      <Grid Background="Transparent"><Grid.ColumnDefinitions><ColumnDefinition Width="22"/><ColumnDefinition/></Grid.ColumnDefinitions>
-      <Ellipse x:Name="Circle" Width="14" Height="14" Stroke="#55555A" StrokeThickness="1.4"/>
+      <Ellipse x:Name="Circle" Width="14" Height="14" Stroke="#8A8A8E" StrokeThickness="1.4"/>
       <Path x:Name="Tick" Data="M3,8 L7,12 L15,3" Width="9" Height="8" Stretch="Uniform" Stroke="Black" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Visibility="Collapsed"/>
       <ContentPresenter Grid.Column="1" VerticalAlignment="Center"/>
      </Grid><ControlTemplate.Triggers>

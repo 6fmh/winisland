@@ -2,26 +2,37 @@
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:controls="clr-namespace:Winisland.Controls"
- AutomationProperties.LiveSetting="Polite" Focusable="False">
+ AutomationProperties.LiveSetting="Polite" Focusable="False" KeyboardNavigation.TabNavigation="Continue">
  <Grid Background="Transparent">
-  <Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition Width="14"/><ColumnDefinition/><ColumnDefinition Width="30"/></Grid.ColumnDefinitions>
-  <Border Width="40" Height="40" CornerRadius="10" Background="#252527" VerticalAlignment="Center">
-   <Grid>
-    <controls:NotchIcon x:Name="FallbackIcon" Kind="Bell" Width="22" Height="22" Foreground="#D1D1D6" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-    <Image x:Name="AppIcon" Stretch="Uniform" Margin="3"/>
+  <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="44"/></Grid.ColumnDefinitions>
+  <Button x:Name="OpenButton" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center"
+   Background="Transparent" BorderThickness="0" Padding="0" Cursor="Arrow" Click="OnOpen">
+   <Button.Template><ControlTemplate TargetType="Button">
+    <Border x:Name="FocusRing" Background="Transparent" BorderBrush="Transparent" BorderThickness="2" CornerRadius="8" Margin="-2">
+     <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+    </Border>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="FocusRing" Property="BorderBrush" Value="{DynamicResource KeyboardFocusBlue}"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="FocusRing" Property="Opacity" Value="0.65"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Button.Template>
+   <Grid x:Name="MessageContent">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="44"/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
+    <Border Width="44" Height="44" CornerRadius="11" Background="#252527" VerticalAlignment="Center">
+     <Grid>
+      <controls:NotchIcon x:Name="FallbackIcon" Kind="Bell" Width="24" Height="24" Foreground="#D1D1D6" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      <Image x:Name="AppIcon" Stretch="Uniform" Margin="3"/>
+     </Grid>
+    </Border>
+    <StackPanel x:Name="TextContent" Grid.Column="2" Margin="0,0,4,0" VerticalAlignment="Center">
+     <TextBlock x:Name="SourceLabel" FontSize="12" LineHeight="16" Foreground="#98989D" TextTrimming="CharacterEllipsis" Margin="0,0,2,2"/>
+     <TextBlock x:Name="TitleLabel" FontSize="16" LineHeight="20" MaxHeight="40" FontWeight="SemiBold" Foreground="#F5F5F7" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"/>
+     <TextBlock x:Name="BodyLabel" FontSize="13" LineHeight="18" Foreground="#C7C7CC" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="36" Margin="0,4,0,0"/>
+    </StackPanel>
    </Grid>
-  </Border>
-  <Button x:Name="OpenButton" Grid.Column="2" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center"
-   Background="Transparent" BorderThickness="0" Padding="0" Cursor="Arrow" Click="OnOpen" Focusable="False">
-   <Button.Template><ControlTemplate TargetType="Button"><ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/></ControlTemplate></Button.Template>
-   <StackPanel Margin="0,0,12,0">
-    <TextBlock x:Name="SourceLabel" FontSize="11" Foreground="#98989D" TextTrimming="CharacterEllipsis" Margin="0,0,0,4"/>
-    <TextBlock x:Name="TitleLabel" FontSize="14" FontWeight="SemiBold" Foreground="#F5F5F7" TextTrimming="CharacterEllipsis"/>
-    <TextBlock x:Name="BodyLabel" FontSize="12" LineHeight="17" Foreground="#C7C7CC" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="34" Margin="0,4,0,0"/>
-   </StackPanel>
   </Button>
-  <Button x:Name="DismissButton" Grid.Column="3" Width="26" Height="26" VerticalAlignment="Top" Margin="0,2,0,0"
-   Style="{DynamicResource NotchIconButton}" Click="OnDismiss" ToolTip="Dismiss notification" AutomationProperties.Name="Dismiss notification">
+  <Button x:Name="DismissButton" Grid.Column="1" Width="44" Height="44" VerticalAlignment="Center"
+   Style="{DynamicResource PopupDismissButton}" Click="OnDismiss" ToolTip="Dismiss notification" AutomationProperties.Name="Dismiss notification">
    <controls:NotchIcon Kind="Close" Width="12" Height="12" Foreground="#98989D"/>
   </Button>
  </Grid>

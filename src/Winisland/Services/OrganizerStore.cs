@@ -89,7 +89,7 @@ public sealed class OrganizerStore
     {
         if (_data.Events.Length == 0 || day.Year < 1900) return Array.Empty<CalendarEntry>();
         return _data.Events.Where(e => e.AllDay
-                ? DateOnly.FromDateTime(e.Start.LocalDateTime) <= day && day.DayNumber < DateOnly.FromDateTime(e.Start.LocalDateTime).DayNumber + Math.Max(1, e.DurationMinutes / 1440)
+                ? DateOnly.FromDateTime(e.Start.DateTime) <= day && day.DayNumber < DateOnly.FromDateTime(e.Start.DateTime).DayNumber + Math.Max(1, e.DurationMinutes / 1440)
                 : DateOnly.FromDateTime(e.Start.LocalDateTime) <= day
                     && (DateOnly.FromDateTime(e.End.LocalDateTime) > day
                         || DateOnly.FromDateTime(e.End.LocalDateTime) == day && e.End.LocalDateTime.TimeOfDay > TimeSpan.Zero))

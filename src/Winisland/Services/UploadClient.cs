@@ -90,8 +90,8 @@ public sealed class UploadClient : IDisposable
             // The ShareX url is Markdown with an invisible label. Clipboard links must be plain URLs.
             if (share.StartsWith("[", StringComparison.Ordinal) && share.EndsWith(")", StringComparison.Ordinal) && share.IndexOf("](", StringComparison.Ordinal) is var split && split >= 0)
                 share = share[(split + 2)..^1];
-            if (!IsShareLink(direct)) direct = share;
-            if (!IsShareLink(direct)) throw new InvalidOperationException("The host did not return a valid HTTPS file link. Check the uploader's JSON URL field.");
+            if (!IsShareLink(direct)) direct = "";
+            if (!IsShareLink(share) && direct.Length == 0) throw new InvalidOperationException("The host did not return a valid HTTPS file link. Check the uploader's JSON URL field.");
             if (!IsShareLink(viewer)) viewer = "";
             if (!IsShareLink(share)) share = direct;
             return new UploadResult(share, direct, viewer);
@@ -115,8 +115,9 @@ public sealed class UploadClient : IDisposable
     private sealed class ProgressContent : HttpContent
     {
         private readonly Stream _file;
-        private readonly IProgress<double>? _progress;
-        public ProgressContent(Stream file, IProgress<double>? progress) { _file = file; _progress = progress; }
+        private readonly LatestProgress? _progress;
+        public ProgressContent(Stream file, IProgress<double>? progress)
+        { _file = file; _progress = progress is null ? null : new LatestProgress(progress); }
         protected override bool TryComputeLength(out long length) { length = _file.Length; return true; }
         protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => SerializeToStreamAsync(stream, context, CancellationToken.None);
         protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellation)

@@ -44,6 +44,18 @@ internal static class UpdateInstaller
 
     internal static void ValidatePlan(UpdatePlan plan, string directory)
     {
+        if (plan is null || plan.Package is null || string.IsNullOrWhiteSpace(directory)
+            || string.IsNullOrWhiteSpace(plan.Package.InstallerPath) || string.IsNullOrWhiteSpace(plan.Package.Version)
+            || string.IsNullOrWhiteSpace(plan.Package.Sha256) || string.IsNullOrWhiteSpace(plan.ApplicationPath)
+            || string.IsNullOrWhiteSpace(plan.InstallDirectory) || plan.ParentId <= 0 || plan.ParentStartedUtcTicks <= 0)
+            throw new InvalidOperationException("The update plan is invalid.");
+        try { ValidatePlanPaths(plan, directory); }
+        catch (ArgumentException ex) { throw new InvalidOperationException("The update plan is invalid.", ex); }
+        catch (NotSupportedException ex) { throw new InvalidOperationException("The update plan is invalid.", ex); }
+    }
+
+    private static void ValidatePlanPaths(UpdatePlan plan, string directory)
+    {
         var cache = Path.GetFullPath(Path.Combine(SettingsStore.DirectoryPath, "updates")) + Path.DirectorySeparatorChar;
         directory = Path.GetFullPath(directory);
         if (!directory.StartsWith(cache, StringComparison.OrdinalIgnoreCase) || !Regex.IsMatch(Path.GetFileName(directory), "^[a-fA-F0-9]{32}$")
@@ -72,12 +84,16 @@ internal static class UpdateInstaller
     {
         if (BackgroundVerification.IsWorker) return 1;
         UpdatePlan? plan = null;
-        var directory = Path.GetDirectoryName(Path.GetFullPath(planPath))!;
-        var readyPath = Path.Combine(directory, "ready");
+        var readyPath = "";
         var success = false;
+        var parentExited = false;
+        var installerStarted = false;
         var installerFinished = false;
         try
         {
+            if (string.IsNullOrWhiteSpace(planPath)) throw new InvalidOperationException("Invalid update plan.");
+            var directory = Path.GetDirectoryName(Path.GetFullPath(planPath))!;
+            readyPath = Path.Combine(directory, "ready");
             if (Path.GetFileName(planPath) != "update-plan.json" || new FileInfo(planPath).Length > 16384) throw new InvalidOperationException("Invalid update plan.");
             plan = JsonSerializer.Deserialize<UpdatePlan>(await File.ReadAllTextAsync(planPath)) ?? throw new InvalidOperationException("Missing update plan.");
             ValidatePlan(plan, directory);
@@ -103,8 +119,10 @@ internal static class UpdateInstaller
                     await parent.WaitForExitAsync(wait.Token);
                 }
             }
+            parentExited = true;
             using var installer = Process.Start(InstallerStart(plan, Path.Combine(directory, "installer.log")))
                 ?? throw new InvalidOperationException("Couldn't start the installer.");
+            installerStarted = true;
             using (var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(5))) await installer.WaitForExitAsync(deadline.Token);
             installerFinished = true;
             if (installer.ExitCode != 0) throw new InvalidOperationException($"Setup couldn't finish (code {installer.ExitCode}). Try the update again.");
@@ -114,12 +132,13 @@ internal static class UpdateInstaller
             await WriteOutcomeAsync(plan.Package.Version, true, "Update installed.", restarted.Id);
             return 0;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception or JsonException or OperationCanceledException or CryptographicException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception or JsonException or OperationCanceledException or CryptographicException or ArgumentException or NotSupportedException)
         {
             Log.Error("Apply Winisland update", ex);
-            await WriteOutcomeAsync(plan?.Package.Version ?? "", false,
+            await WriteOutcomeAsync(plan?.Package?.Version ?? "", false,
                 ex is InvalidOperationException ? ex.Message : "The update couldn't finish. Please try again.");
-            if (installerFinished && plan is not null && File.Exists(plan.ApplicationPath))
+            if (CanRestartAfterFailure(parentExited, installerStarted, installerFinished)
+                && plan is not null && File.Exists(plan.ApplicationPath))
                 try { using var original = Process.Start(RestartStart(plan.ApplicationPath)); }
                 catch (Win32Exception) { } catch (InvalidOperationException) { }
             return 1;
@@ -133,6 +152,11 @@ internal static class UpdateInstaller
             }
         }
     }
+    // Do not compete with the original app or an installer that may still be
+    // changing its payload. A launch failure after shutdown can safely recover.
+    internal static bool CanRestartAfterFailure(bool parentExited, bool installerStarted, bool installerFinished) =>
+        parentExited && (!installerStarted || installerFinished);
+
     internal static ProcessStartInfo RestartStart(string applicationPath)
     {
         var start = HiddenStart(applicationPath);

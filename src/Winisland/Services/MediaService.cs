@@ -45,6 +45,9 @@ public sealed class MediaService : IDisposable
     public MediaService(Dispatcher dispatcher) => _dispatcher = dispatcher;
     internal void SetSnapshotForTest(MediaSnapshot snapshot) { Current = snapshot; _timelineAt = Stopwatch.GetTimestamp(); Changed?.Invoke(this, EventArgs.Empty); }
     internal Func<double, Task<bool>>? SeekHandlerForTest { get; set; }
+    internal Func<Task<bool>>? ToggleHandlerForTest { get; set; }
+    internal Func<Task<bool>>? PreviousHandlerForTest { get; set; }
+    internal Func<Task<bool>>? NextHandlerForTest { get; set; }
 
     public async Task InitializeAsync()
     {
@@ -202,9 +205,15 @@ public sealed class MediaService : IDisposable
         ? TimeSpan.FromTicks(Math.Clamp((Current.Position + Stopwatch.GetElapsedTime(_timelineAt)).Ticks, 0, Current.Duration.Ticks))
         : Current.Position;
 
-    public async Task<bool> ToggleAsync() => await ControlAsync(s => s.TryTogglePlayPauseAsync().AsTask(), Current.CanToggle);
-    public async Task<bool> PreviousAsync() => await ControlAsync(s => s.TrySkipPreviousAsync().AsTask(), Current.CanPrevious);
-    public async Task<bool> NextAsync() => await ControlAsync(s => s.TrySkipNextAsync().AsTask(), Current.CanNext);
+    public async Task<bool> ToggleAsync() => ToggleHandlerForTest is { } handler
+        ? Current.HasSession && Current.CanToggle && await handler()
+        : await ControlAsync(s => s.TryTogglePlayPauseAsync().AsTask(), Current.CanToggle);
+    public async Task<bool> PreviousAsync() => PreviousHandlerForTest is { } handler
+        ? Current.HasSession && Current.CanPrevious && await handler()
+        : await ControlAsync(s => s.TrySkipPreviousAsync().AsTask(), Current.CanPrevious);
+    public async Task<bool> NextAsync() => NextHandlerForTest is { } handler
+        ? Current.HasSession && Current.CanNext && await handler()
+        : await ControlAsync(s => s.TrySkipNextAsync().AsTask(), Current.CanNext);
     public async Task<bool> SeekAsync(double seconds)
     {
         if (!double.IsFinite(seconds)) return false;

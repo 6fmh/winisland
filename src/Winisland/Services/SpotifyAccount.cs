@@ -69,6 +69,7 @@ public sealed class SpotifyAccount : IDisposable
         operation.CancelAfter(TimeSpan.FromMinutes(3));
         var token = operation.Token;
         await _gate.WaitAsync(token);
+        var generation = _generation;
         try
         {
             using var listener = new TcpListener(IPAddress.Loopback, new Uri(RedirectUri).Port);
@@ -85,27 +86,41 @@ public sealed class SpotifyAccount : IDisposable
             });
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
             var code = await ReceiveAuthorizationAsync(listener, state, token);
-            using var response = await _http.PostAsync("https://accounts.spotify.com/api/token", new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["grant_type"] = "authorization_code", ["code"] = code, ["redirect_uri"] = RedirectUri,
-                ["client_id"] = clientId, ["code_verifier"] = verifier
-            }), token);
-            if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Spotify could not finish sign-in. Check the app's Client ID, redirect URI, and allowed users.");
-            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
-            var root = json.RootElement;
-            ReadToken(root);
-            if (!root.TryGetProperty("refresh_token", out var refresh) || refresh.ValueKind != JsonValueKind.String
-                || string.IsNullOrWhiteSpace(refresh.GetString())) throw new JsonException("Invalid Spotify authorization response.");
-            var credentials = new Credentials(clientId, refresh.GetString()!);
-            Save(credentials);
-            _credentials = credentials;
-            ++_generation;
-            SetAccessToken(root);
-            _current = new(); _nextRead = _retryAt = _holdUntil = 0;
-            Status = "Account connected · 1% volume steps";
-            Changed?.Invoke(this, EventArgs.Empty);
+            token.ThrowIfCancellationRequested();
+            if (_disposed || generation != _generation) throw new OperationCanceledException(token);
+            await FinishSignInAsync(clientId, code, verifier, token, generation);
         }
         finally { _gate.Release(); }
+    }
+
+    // Kept separate from the browser callback so the final account transition
+    // can also be verified without opening a browser or a loopback listener.
+    internal async Task FinishSignInAsync(string clientId, string code, string verifier, CancellationToken token, long? expectedGeneration = null)
+    {
+        var generation = expectedGeneration ?? _generation;
+        token.ThrowIfCancellationRequested();
+        if (_disposed || generation != _generation) throw new OperationCanceledException(token);
+        using var response = await _http.PostAsync("https://accounts.spotify.com/api/token", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code", ["code"] = code, ["redirect_uri"] = RedirectUri,
+            ["client_id"] = clientId, ["code_verifier"] = verifier
+        }), token);
+        if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Spotify could not finish sign-in. Check the app's Client ID, redirect URI, and allowed users.");
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
+        token.ThrowIfCancellationRequested();
+        if (_disposed || generation != _generation) throw new OperationCanceledException(token);
+        var root = json.RootElement;
+        ReadToken(root);
+        if (!root.TryGetProperty("refresh_token", out var refresh) || refresh.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(refresh.GetString())) throw new JsonException("Invalid Spotify authorization response.");
+        var credentials = new Credentials(clientId, refresh.GetString()!);
+        Save(credentials);
+        _credentials = credentials;
+        ++_generation;
+        SetAccessToken(root);
+        _current = new(); _nextRead = _retryAt = _holdUntil = 0;
+        Status = "Account connected · 1% volume steps";
+        Changed?.Invoke(this, EventArgs.Empty);
     }
 
     public void Disconnect()
@@ -125,12 +140,12 @@ public sealed class SpotifyAccount : IDisposable
         using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
         var token = operation.Token;
         await _gate.WaitAsync(token);
+        var generation = _generation;
+        var missing = new PlayerVolumeSnapshot { Source = media.Source, Player = "Spotify", Step = 1, ConnectionHint = Status };
         try
         {
-            var missing = new PlayerVolumeSnapshot { Source = media.Source, Player = "Spotify", Step = 1, ConnectionHint = Status };
             if (!IsConnected || _disposed) return missing;
             var now = Environment.TickCount64;
-            var generation = _generation;
             if (now < _retryAt || now < _nextRead) return _current with { Source = media.Source };
             _nextRead = now + 1000;
             using var response = await SendAsync(HttpMethod.Get, "https://api.spotify.com/v1/me/player", token);
@@ -166,6 +181,9 @@ public sealed class SpotifyAccount : IDisposable
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException && !token.IsCancellationRequested)
         {
+            // A disconnected or replaced account owns its new state even when
+            // the old request completes with an error instead of a response.
+            if (_disposed || generation != _generation) return missing with { ConnectionHint = Status };
             _nextRead = Environment.TickCount64 + 3000;
             Status = "Spotify is temporarily unavailable. Try again shortly.";
             return _current with { Source = media.Source, ConnectionHint = Status };
@@ -208,12 +226,15 @@ public sealed class SpotifyAccount : IDisposable
 
     private async Task<HttpResponseMessage?> SendAsync(HttpMethod method, string url, CancellationToken token)
     {
+        var generation = _generation;
         if (Environment.TickCount64 < _retryAt || !await EnsureTokenAsync(token)) return null;
+        if (_disposed || generation != _generation) return null;
         for (var attempt = 0; attempt < 2; attempt++)
         {
             using var request = new HttpRequestMessage(method, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
             var response = await _http.SendAsync(request, token);
+            if (_disposed || generation != _generation) { response.Dispose(); return null; }
             if (response.StatusCode == HttpStatusCode.Unauthorized && attempt == 0)
             {
                 response.Dispose(); _accessToken = "";
@@ -236,6 +257,7 @@ public sealed class SpotifyAccount : IDisposable
     {
         if (_accessToken.Length > 0 && Environment.TickCount64 < _expiresAt) return true;
         var credentials = _credentials;
+        var generation = _generation;
         if (credentials is null) return false;
         using var response = await _http.PostAsync("https://accounts.spotify.com/api/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {
@@ -243,7 +265,7 @@ public sealed class SpotifyAccount : IDisposable
         }), token);
         if (!response.IsSuccessStatusCode)
         {
-            if (_disposed || _credentials != credentials) return false;
+            if (_disposed || generation != _generation || _credentials != credentials) return false;
             if (response.StatusCode == HttpStatusCode.BadRequest || response.StatusCode == HttpStatusCode.Unauthorized)
             {
                 _credentials = null; _accessToken = ""; _current = new();
@@ -255,7 +277,7 @@ public sealed class SpotifyAccount : IDisposable
             return false;
         }
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
-        if (_disposed || _credentials != credentials) return false;
+        if (_disposed || generation != _generation || _credentials != credentials) return false;
         SetAccessToken(json.RootElement);
         if (json.RootElement.TryGetProperty("refresh_token", out var refreshed) && refreshed.ValueKind == JsonValueKind.String
             && refreshed.GetString() is { Length: > 0 } refresh)

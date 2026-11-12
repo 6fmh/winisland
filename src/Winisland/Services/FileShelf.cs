@@ -13,10 +13,33 @@ public enum UploadState { Local, NeedsConnection, Queued, Uploading, Processing,
 
 public sealed class ShelfItem : INotifyPropertyChanged
 {
-    public ShelfItem(string path) => Path = path;
+    private static readonly PropertyChangedEventArgs StateChanged = new(nameof(State));
+    private static readonly PropertyChangedEventArgs ProgressChanged = new(nameof(Progress));
+    private static readonly PropertyChangedEventArgs StatusChanged = new(nameof(Status));
+    private static readonly PropertyChangedEventArgs ShareChanged = new(nameof(ShareUrl));
+    private static readonly PropertyChangedEventArgs FileChanged = new(nameof(FileUrl));
+    private static readonly PropertyChangedEventArgs ViewerChanged = new(nameof(ViewerUrl));
+    private static readonly PropertyChangedEventArgs ErrorChanged = new(nameof(Error));
+    private static readonly PropertyChangedEventArgs LinkChanged = new(nameof(HasLink));
+    private static readonly PropertyChangedEventArgs DirectLinkChanged = new(nameof(HasDirectLink));
+    private static readonly PropertyChangedEventArgs RetryChanged = new(nameof(CanRetry));
+    private static readonly PropertyChangedEventArgs CancelChanged = new(nameof(CanCancel));
+    private static readonly PropertyChangedEventArgs UploadingChanged = new(nameof(IsUploading));
+    private readonly string _fileDetail;
+    private bool _directLinkValid;
+    private string _status;
+    public ShelfItem(string path)
+    {
+        Path = path;
+        Name = System.IO.Path.GetFileName(path.TrimEnd('\\', '/'));
+        // Cache immutable path text, while file/folder identity remains live.
+        _fileDetail = System.IO.Path.GetExtension(path).TrimStart('.').ToUpperInvariant()
+            is { Length: > 0 } extension ? extension + " file" : "File";
+        _status = _fileDetail;
+    }
     public string Path { get; }
-    public string Name => System.IO.Path.GetFileName(Path.TrimEnd('\\', '/'));
-    public string Detail => Directory.Exists(Path) ? "Folder" : System.IO.Path.GetExtension(Path).TrimStart('.').ToUpperInvariant() is { Length: > 0 } extension ? extension + " file" : "File";
+    public string Name { get; }
+    public string Detail => Directory.Exists(Path) ? "Folder" : _fileDetail;
     public UploadState State { get; private set; }
     public double Progress { get; private set; }
     public string ShareUrl { get; private set; } = "";
@@ -24,26 +47,58 @@ public sealed class ShelfItem : INotifyPropertyChanged
     public string ViewerUrl { get; private set; } = "";
     public string Error { get; private set; } = "";
     public bool HasLink => State == UploadState.Uploaded && ShareUrl.Length > 0;
-    public bool CanRetry => !Directory.Exists(Path) && State is UploadState.Failed or UploadState.Cancelled or UploadState.Local;
+    public bool HasDirectLink => HasLink && _directLinkValid;
+    public bool CanRetry => (State is UploadState.Failed or UploadState.Cancelled or UploadState.Local) && !Directory.Exists(Path);
     public bool CanCancel => State is UploadState.Queued or UploadState.Uploading or UploadState.Processing or UploadState.NeedsConnection;
     public bool IsUploading => State is UploadState.Uploading or UploadState.Processing;
-    public string Status => State switch
-    {
-        UploadState.NeedsConnection => "Connect in Settings",
-        UploadState.Queued => "Waiting to upload",
-        UploadState.Uploading => $"Uploading · {Progress:0}%",
-        UploadState.Processing => "Finishing on the host…",
-        UploadState.Uploaded => "Uploaded · link ready",
-        UploadState.Failed => Error,
-        UploadState.Cancelled => Error.Length > 0 ? Error : "Cancelled · retry anytime",
-        _ => Directory.Exists(Path) ? "Folder · kept locally" : Detail
-    };
+    public string Status => State == UploadState.Local
+        ? Directory.Exists(Path) ? "Folder · kept locally" : _fileDetail
+        : _status;
     public event PropertyChangedEventHandler? PropertyChanged;
     internal void SetUpload(UploadState state, double progress = 0, string error = "", UploadResult? result = null)
     {
+        var oldState = State;
+        var oldProgress = Progress;
+        var oldError = Error;
+        var oldStatus = Status;
+        var oldShare = ShareUrl;
+        var oldFile = FileUrl;
+        var oldViewer = ViewerUrl;
+        var oldLink = HasLink;
+        var oldDirectLink = HasDirectLink;
+        var oldRetry = CanRetry;
+        var oldCancel = CanCancel;
+        var oldUploading = IsUploading;
         State = state; Progress = progress; Error = error;
-        if (result is not null) { ShareUrl = result.ShareUrl; FileUrl = result.FileUrl; ViewerUrl = result.ViewerUrl; }
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
+        if (result is not null)
+        {
+            ShareUrl = result.ShareUrl; FileUrl = result.FileUrl; ViewerUrl = result.ViewerUrl;
+            if (oldFile != FileUrl) _directLinkValid = UploadClient.IsShareLink(FileUrl);
+        }
+        if (oldState != state || oldProgress != progress || oldError != error)
+            _status = state switch
+            {
+                UploadState.NeedsConnection => "Connect in Settings",
+                UploadState.Queued => "Waiting to upload",
+                UploadState.Uploading => $"Uploading · {progress:0}%",
+                UploadState.Processing => "Finishing on the host…",
+                UploadState.Uploaded => "Uploaded · link ready",
+                UploadState.Failed => error,
+                UploadState.Cancelled => error.Length > 0 ? error : "Cancelled · retry anytime",
+                _ => _fileDetail
+            };
+        if (oldState != State) PropertyChanged?.Invoke(this, StateChanged);
+        if (oldProgress != Progress) PropertyChanged?.Invoke(this, ProgressChanged);
+        if (oldError != Error) PropertyChanged?.Invoke(this, ErrorChanged);
+        if (oldStatus != Status) PropertyChanged?.Invoke(this, StatusChanged);
+        if (oldShare != ShareUrl) PropertyChanged?.Invoke(this, ShareChanged);
+        if (oldFile != FileUrl) PropertyChanged?.Invoke(this, FileChanged);
+        if (oldViewer != ViewerUrl) PropertyChanged?.Invoke(this, ViewerChanged);
+        if (oldLink != HasLink) PropertyChanged?.Invoke(this, LinkChanged);
+        if (oldDirectLink != HasDirectLink) PropertyChanged?.Invoke(this, DirectLinkChanged);
+        if (oldRetry != CanRetry) PropertyChanged?.Invoke(this, RetryChanged);
+        if (oldCancel != CanCancel) PropertyChanged?.Invoke(this, CancelChanged);
+        if (oldUploading != IsUploading) PropertyChanged?.Invoke(this, UploadingChanged);
     }
 }
 
@@ -105,7 +160,7 @@ public sealed class FileShelf
     private static string? ReadString(JsonElement entry, string name) => entry.ValueKind == JsonValueKind.Object
         && entry.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
-    private static string? NormalizePath(string? path, bool requireExisting = true)
+    internal static string? NormalizePath(string? path, bool requireExisting = true)
     {
         if (string.IsNullOrWhiteSpace(path) || !System.IO.Path.IsPathFullyQualified(path)) return null;
         try

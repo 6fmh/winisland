@@ -11,13 +11,17 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets/Winisland.ico</ApplicationIcon>
     <AssemblyName>Winisland</AssemblyName>
-    <Version>0.5.0</Version>
+    <Version>0.6.0</Version>
+    <WinislandPrivateBuild Condition="'$(WinislandPrivateBuild)' == ''">false</WinislandPrivateBuild>
     <RepositoryUrl>https://github.com/6fmh/winisland</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <Authors>6fmh</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Description>A quiet little space at the top of your Windows desktop.</Description>
   </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="WinislandPrivateBuild" Value="$(WinislandPrivateBuild)" />
+  </ItemGroup>
   <ItemGroup><Resource Include="Assets/Winisland.png" /></ItemGroup>
   <ItemGroup>
     <Resource Include="Assets/Fonts/*.ttf" />

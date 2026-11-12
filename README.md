@@ -1,8 +1,8 @@
-# Winisland — macOS-style notch for Windows
+# Winisland — Dynamic Island and macOS notch for Windows
 
 **Your music, files, and day. One notch.**
 
-Winisland is a free, open-source **macOS-style notch for Windows 11 and Windows 10**. Control music, keep files close, run a focus timer, and check your calendar from a small panel at the top of your screen. It brings Dynamic Island-style desktop interactions to Windows with a native C# / WPF app.
+Winisland is a free, open-source **macOS-style notch for Windows 11 and Windows 10**. Control music, keep files close, run a focus timer, and check your calendar from a small panel at the top of your screen. It also offers an optional **Dynamic Island for Windows** appearance, built with native C# / WPF.
 
 <p align="center">
   <a href="https://github.com/6fmh/winisland/releases/latest"><img src="https://img.shields.io/github/v/release/6fmh/winisland?style=flat-square&amp;label=download&amp;color=0078D4" alt="Download the latest Winisland release"></a>
@@ -23,7 +23,9 @@ Winisland is a free, open-source **macOS-style notch for Windows 11 and Windows 
   <a href="https://github.com/6fmh/winisland/issues">Report an issue</a>
 </p>
 
-## A small home for everyday things
+> **Feature availability:** The optional Dynamic Island appearance requires **v0.6.0 or later**. Windows notification previews require **v0.5.0 or later**. Check the [release notes and downloads](https://github.com/6fmh/winisland/releases) for the version you install.
+
+## MacBook notch and Dynamic Island for Windows
 
 Hover to expand. Click to pin it open. Move away to return to the compact notch. Music, timer, and upload activity stay visible at a glance; fullscreen hiding and reduced motion are available in Settings.
 
@@ -31,7 +33,9 @@ Hover to expand. Click to pin it open. Move away to return to the compact notch.
   <img src="docs/images/compact-notch.png" width="700" alt="Compact Winisland notch at the top edge of the display, with music artwork and a live audio spectrum around a centered black camera area">
 </p>
 
-The silhouette follows the MacBook's inward-curved top shoulders and rounded lower corners. The expanding panels are Winisland's software features, inspired by projects such as [Boring Notch](https://github.com/TheBoredTeam/boring.notch). Apple's physical camera housing is the visual reference.
+The default silhouette follows the MacBook's inward-curved top shoulders and rounded lower corners. The expanding panels are Winisland's software features, inspired by projects such as [Boring Notch](https://github.com/TheBoredTeam/boring.notch). Apple's physical camera housing is the visual reference.
+
+Choose **Settings → Appearance → Notch style → Dynamic Island** for an iPhone-inspired floating pill, compact music and a separate timer activity, and an expanded music player. The **…** menu keeps your other controls close by. **MacBook notch** remains the default, and switching back restores your saved MacBook dimensions. [Design references and measurements](docs/apple-dynamic-island-geometry-research.md).
 
 ## Features
 
@@ -44,7 +48,9 @@ The silhouette follows the MacBook's inward-curved top shoulders and rounded low
 | **Calendar** | Browse months, manage local agenda events, and import or export `.ics` files. |
 | **Everyday tools** | Save quick notes, set reminders, check world clocks, and use a stopwatch with laps. |
 | **Control Center** | Access Wi-Fi, Bluetooth, supported display brightness, system volume, and Windows settings shortcuts. |
-| **Desktop preferences** | Choose a display, adjust notch size and hover behavior, enable reduced motion, and hide the notch for fullscreen apps. Laptops also show battery status. |
+| **Windows notifications (v0.5.0+)** | Preview incoming visible Windows notification banners with an app icon, title, and message. Windows controls sound and Do Not Disturb. [Notification setup and limits](docs/NOTIFICATIONS.md). |
+| **Apple accessory connections** | See connection moments for supported Apple accessories, including AirPods. Device names and model details depend on the metadata Windows exposes. |
+| **Desktop preferences** | Choose the default MacBook notch or optional Dynamic Island, select a display, adjust MacBook notch size and hover behavior, enable reduced motion, and hide the notch for fullscreen apps. Laptops also show battery status. |
 | **Built-in updates** | See new stable releases in the notch, download with progress, and choose **Update and restart**. |
 
 ## Screenshots
@@ -94,7 +100,7 @@ Updates preserve settings, notes, file references, encrypted connections, and yo
 
 ## Getting started
 
-Hover over the notch to open it, then choose an activity from the header. Click to pin it open for keyboard input. **Esc** closes a pinned panel; double-click the tray icon to open Settings. Quit from the tray menu's **Quit Winisland** action.
+Hover over the notch to open it, then choose an activity from the header or Dynamic Island's **…** menu. Click to pin it open for keyboard input. **Esc** closes a pinned panel; double-click the tray icon to open Settings. Quit from the tray menu's **Quit Winisland** action.
 
 | Shortcut | Action |
 | --- | --- |
@@ -105,15 +111,15 @@ Hover over the notch to open it, then choose an activity from the header. Click 
 | **Middle-click the notch** | Play/pause music |
 | **Esc** | Close a pinned panel, or cancel the active text edit |
 
-### Music and player volume
+### Music controls for Spotify and Chromium browsers
 
 Start playback in an app that exposes a Windows media session. Winisland shows the available playback controls; support for seeking and track changes depends on the player.
 
-For **Comet, Chrome, Edge, Brave, and compatible Chromium browsers**, open **Settings → Player controls** and follow the companion-extension instructions. Load the bundled folder from the browser's extensions page and reload already-open media tabs. The companion connects locally and controls supported HTML5 and YouTube players.
+For **Comet, Chrome, Edge, Brave, and compatible Chromium browsers**, open **Settings → Player controls** and follow the companion-extension instructions. Load the bundled folder from the browser's extensions page and reload already-open media tabs. The companion connects locally and controls supported HTML5 and YouTube players. [Browser companion installation and permissions](src/Winisland/Assets/BrowserExtension/README.md).
 
 **Spotify desktop** can use its accessible volume control when available; some versions expose 10% steps. Optional Spotify account integration supports 1% changes and requires Premium plus a Spotify developer app. [Player volume and Spotify setup](docs/player-volume.md).
 
-### Files and uploads
+### File shelf and ShareX uploads
 
 Drop files or folders onto the notch to keep them in the shelf. The shelf stores references to your originals; removing an item leaves the original file untouched.
 
@@ -129,9 +135,13 @@ Use Calendar for local events and `.ics` import/export. Tools contains notes, re
 
 ### Updates
 
-Winisland checks this repository's stable GitHub releases after startup and every four hours. When an update appears, choose **Update and restart** in the Software update tab. You can cancel during download.
+Winisland checks this repository's stable GitHub releases on startup and every 30 minutes. When an update appears, choose **Update and restart** in the Software update tab. You can cancel during download.
 
 Check manually from the tray menu, **Settings → About**, or **Ctrl+7** while pinned. [Update and startup details](docs/UPDATES.md).
+
+### Windows notification previews
+
+In **v0.5.0 or later**, enable **Settings → Activities → Notifications on the notch** to show incoming visible Windows banners. Dismiss closes the notch preview; click the preview to open its source when a supported action is available. Notification Center history is not replayed. [Setup, privacy, and troubleshooting](docs/NOTIFICATIONS.md).
 
 ## Privacy and local data
 
@@ -139,22 +149,31 @@ Check manually from the tray menu, **Settings → About**, or **Ctrl+7** while p
 - **Local storage.** Settings, notes, file references, and logs live in `%LOCALAPPDATA%\Winisland`. Upload connections and Spotify refresh tokens use Windows DPAPI encryption for your account.
 - **Your upload destination.** Files leave your PC when an upload runs against the server you configured. Removing a shelf item does not delete a hosted file.
 - **Local browser bridge.** The companion uses native messaging, makes no network requests, and saves no browsing history. Release checks contact GitHub; optional Spotify account integration contacts Spotify.
+- **Notification privacy.** Incoming notification previews stay in memory; their message content is not saved to files or diagnostic logs.
 
 ## Compatibility and common questions
 
-**Does it work on a desktop PC without a physical notch?**
+### Is Winisland free and open source?
+
+Yes. Winisland uses the [MIT license](LICENSE). You can download it, inspect the C# / WPF source, and contribute improvements.
+
+### Does it work on a desktop PC without a physical notch?
 
 Yes. Winisland draws a software overlay at the display's top edge. You can select the display and adjust its size in Settings. It does not reserve screen space, so fullscreen hiding is useful for games and video.
 
-**Why is player volume unavailable?**
+### Can I use Dynamic Island on Windows 10 and Windows 11?
+
+The current source supports both through **Settings → Appearance → Notch style → Dynamic Island**. This appearance awaits a tagged release; build from source to try it. It is a Windows software overlay, and no Apple hardware is required.
+
+### Why is player volume unavailable?
 
 Player volume needs a supported local control, browser companion, or Spotify connection. Open **Settings → Player controls**. The music slider does not fall back to changing Windows mixer levels; use Control Center's system sound slider for Windows output volume.
 
-**Does it include macOS services?**
+### Does it include macOS services?
 
-Its calendar is local, with no calendar-account sync. AirDrop, Continuity, phone mirroring, webcam preview, external-monitor brightness, and arbitrary Windows notification interception are outside the current feature set. Timer state resets when the app exits.
+Its calendar is local, with no calendar-account sync. AirDrop, Continuity, phone mirroring, webcam preview, and external-monitor brightness are outside the current feature set. Supported notification previews observe visible Windows banners; they do not provide notification history or a general notification subscription API. Timer state resets when the app exits.
 
-**Can I use Windows on ARM?**
+### Can I use Windows on ARM?
 
 The build scripts support `win-arm64`, but the published, verified installer is x64. Native ARM64 builds need verification on an ARM64 machine.
 
@@ -165,19 +184,18 @@ Use Windows and the .NET 8 SDK. The build script can download the SDK into the r
 ```powershell
 git clone https://github.com/6fmh/winisland.git
 Set-Location winisland
-.\scripts\Build.ps1 -Verify
+.\scripts\Build.ps1 -PrivateBuild -Verify
 ```
 
 `-Verify` publishes a separate candidate and runs native checks on a **private Windows desktop**, keeping the interactive desktop and an existing Winisland instance undisturbed. JSON reports and rendered PNGs are written under `artifacts/verification/`.
 
-To create and run a portable build:
+This creates a personal candidate with public update checks disabled. To run that verified candidate yourself:
 
 ```powershell
-.\scripts\Build.ps1
-.\Start-Winisland.ps1
+Start-Process -FilePath .\artifacts\verification\candidate\private\win-x64\Winisland.exe -ArgumentList '--background' -WindowStyle Hidden
 ```
 
-The portable output is `dist/win-x64/Winisland.exe` and requires the [.NET 8 Desktop Runtime (x64)](https://dotnet.microsoft.com/en-us/download/dotnet/8). The launcher starts in the background; pass `-Settings` to open Settings.
+The portable candidate requires the [.NET 8 Desktop Runtime (x64)](https://dotnet.microsoft.com/en-us/download/dotnet/8). See the [contributing and verification guide](CONTRIBUTING.md) for the source layout, public builds, and background checks.
 
 <details>
 <summary>Self-contained builds, installers, and additional checks</summary>
@@ -185,7 +203,7 @@ The portable output is `dist/win-x64/Winisland.exe` and requires the [.NET 8 Des
 Include the runtime in a standalone build:
 
 ```powershell
-.\scripts\Build.ps1 -SelfContained
+.\scripts\Build.ps1 -PrivateBuild -SelfContained -Verify
 ```
 
 Build and verify the installer payload with [Inno Setup 6](https://jrsoftware.org/isdl.php):
@@ -200,7 +218,7 @@ Verify an existing candidate using `scripts/Invoke-Verification.ps1 -ExecutableP
 
 Full install, upgrade, rollback, and uninstall checks change registry and shell settings. Run `scripts/Verify-Installer.ps1 -InstallerPath <setup.exe> -AllowDesktopChanges` only in a **disposable Windows VM**. GitHub Actions runs that lifecycle gate alongside native app and payload checks.
 
-Browser safety checks run with `node scripts/Verify-BrowserSafety.mjs`. See [AGENTS.md](AGENTS.md) for the background verification rules.
+Browser safety checks run with `node scripts/Verify-BrowserSafety.mjs`. See [background verification guidance](CONTRIBUTING.md#verify-your-change) before running checks.
 
 </details>
 
@@ -209,9 +227,9 @@ Browser safety checks run with `node scripts/Verify-BrowserSafety.mjs`. See [AGE
 Maintained by [6fmh](https://github.com/6fmh). Bug reports and contributions are welcome.
 
 - [Report a bug or request a feature](https://github.com/6fmh/winisland/issues). Include your Windows version, Winisland version, what you expected, and steps to reproduce.
-- Submit pull requests against `main`. Run `scripts/Build.ps1 -Verify` for code changes and include relevant verification evidence.
-- Read the [design specification](docs/NOTCH-DESIGN.md), [Control Center behavior](docs/CONTROL-CENTER.md), [organizer guide](docs/ORGANIZER.md), [player volume guide](docs/player-volume.md), and [update guide](docs/UPDATES.md).
-- Check the [latest release notes](https://github.com/6fmh/winisland/releases/latest) and [contributor instructions](AGENTS.md).
+- Submit pull requests against `main`. Follow the [contributing guide](CONTRIBUTING.md) and include relevant verification evidence for code changes.
+- Read the [design specification](docs/NOTCH-DESIGN.md), [Windows Control Center guide](docs/CONTROL-CENTER.md), [calendar, notes, and organizer guide](docs/ORGANIZER.md), [Spotify and browser volume guide](docs/player-volume.md), [Windows notifications guide](docs/NOTIFICATIONS.md), and [update guide](docs/UPDATES.md).
+- Check the [latest release notes](https://github.com/6fmh/winisland/releases/latest).
 
 ## Credits and license
 

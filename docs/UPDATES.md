@@ -1,6 +1,16 @@
 # Updates and startup
 
-Winisland checks the public stable release at `https://api.github.com/repos/6fmh/winisland/releases/latest` ten seconds after first paint, then every four hours. Checking never delays the notch. Use the tray's **Check for updates**, **Settings → About → Check for updates**, or **Ctrl+7** while pinned for a manual check.
+For a personal beta that should ignore public releases, build with:
+
+```powershell
+./scripts/Build.ps1 -PrivateBuild -Verify
+```
+
+This writes a verified candidate to `artifacts/verification/candidate/private/win-x64/Winisland.exe`. The private-build flag is embedded in the application: it disables automatic and manual public update checks, so neither the Update indicator nor an install offer appears. Opening Software update explains that public updates are disabled. It does not change your version number or shared settings. Use the candidate for your personal beta; building it does not replace or restart your running app.
+
+Without `-PrivateBuild`, builds and release installers keep their normal updater. Private and public builds use separate intermediate directories and default output paths. Direct `dotnet publish` builds can set `-p:WinislandPrivateBuild=true` for the same behavior.
+
+Winisland checks the public stable release at `https://api.github.com/repos/6fmh/winisland/releases/latest` on startup after first paint, then every 30 minutes. Checking never delays the notch. Use the tray's **Check for updates**, **Settings → About → Check for updates**, or **Ctrl+7** while pinned for a manual check.
 
 A newer release shows a cyan Update indicator in the closed notch and a Software update tab. Open the tab and choose **Update and restart**. Progress reports downloaded bytes. **Cancel** stops the download and leaves the release available for later. Network and validation errors stay in the tab and allow retry; the running app remains open until the helper confirms it is ready.
 

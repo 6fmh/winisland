@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Threading;
@@ -35,6 +36,36 @@ internal static class StartupRegistration
     }
 
     internal static Change BeginChange(bool enabled) => new(enabled);
+    internal sealed record Removal(bool RemoveTask, bool RemoveRun, bool ClearPreference);
+
+    internal static Removal PlanOwnedRemoval(string? taskXml, object? runCommand, string application)
+    {
+        var ownedTask = false;
+        if (taskXml is not null)
+        {
+            try
+            {
+                XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+                var root = XDocument.Parse(taskXml).Root;
+                var actions = root?.Name == ns + "Task" ? root.Elements(ns + "Actions").ToArray() : null;
+                var action = actions is { Length: 1 } ? actions[0].Elements().ToArray() : null;
+                if (action is { Length: 1 } && action[0].Name == ns + "Exec")
+                {
+                    var commands = action[0].Elements(ns + "Command").ToArray();
+                    var arguments = action[0].Elements(ns + "Arguments").ToArray();
+                    ownedTask = commands.Length == 1 && arguments.Length == 1
+                        && commands[0].Value.Equals(application, StringComparison.OrdinalIgnoreCase)
+                        && arguments[0].Value.Trim() == "--background";
+                }
+            }
+            catch (System.Xml.XmlException) { }
+        }
+        var ownedRun = runCommand is string command
+            && command.Trim().Equals($"\"{application}\" --background", StringComparison.OrdinalIgnoreCase);
+        var foreignRecord = taskXml is not null && !ownedTask || runCommand is not null && !ownedRun;
+        return new(ownedTask, ownedRun, (ownedTask || ownedRun) && !foreignRecord);
+    }
+
     internal static void EnsureEnabled()
     {
         using var change = BeginChange(true);
@@ -47,6 +78,14 @@ internal static class StartupRegistration
         {
             if (BackgroundVerification.IsWorker) return 1;
             var settings = new SettingsStore();
+            if (value == "remove-owned")
+            {
+                using var removal = BeginChange(false);
+                var plan = removal.RemoveOwned(Environment.ProcessPath ?? throw new InvalidOperationException("Cannot determine the app location."));
+                if (plan.ClearPreference) settings.Update(settings.Current with { StartWithWindows = false });
+                removal.Commit();
+                return 0;
+            }
             var enabled = value switch { "true" => true, "false" => false, "preserve" => settings.Current.StartWithWindows, _ => throw new ArgumentException("Invalid startup preference.") };
             // Installer paths must be refreshed even if the preference did not
             // change, including moves from a portable copy and legacy Run keys.
@@ -89,6 +128,15 @@ internal static class StartupRegistration
             if (_enabled) scheduler.Write(BuildTaskXml(Environment.ProcessPath ?? throw new InvalidOperationException("Cannot determine the app location."), UserSid));
             else scheduler.Delete();
             _run.DeleteValue("Winisland", false);
+        }
+        internal Removal RemoveOwned(string application)
+        {
+            var plan = PlanOwnedRemoval(_previousTask, _previousRun, application);
+            if (!plan.RemoveTask && !plan.RemoveRun) return plan;
+            _applied = true;
+            if (plan.RemoveTask) { using var scheduler = new Scheduler(); scheduler.Delete(); }
+            if (plan.RemoveRun) _run.DeleteValue("Winisland", false);
+            return plan;
         }
         internal void Commit() => _committed = true;
         public void Dispose()

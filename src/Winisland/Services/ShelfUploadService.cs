@@ -64,7 +64,9 @@ public sealed class ShelfUploadService : IDisposable
                     var progress = new Progress<double>(value =>
                     {
                         if (!item.IsUploading || cancellation.IsCancellationRequested || _disposed) return;
-                        item.SetUpload(value >= 100 ? UploadState.Processing : UploadState.Uploading, value);
+                        var nextState = value >= 100 ? UploadState.Processing : UploadState.Uploading;
+                        if (item.State == nextState && item.Progress == value) return;
+                        item.SetUpload(nextState, value);
                         Changed?.Invoke(this, EventArgs.Empty);
                     });
                     var result = await _client.UploadAsync(item.Path, connection, progress, cancellation.Token);

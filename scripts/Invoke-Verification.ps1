@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$ExecutablePath,
     [string]$OutputDirectory,
-    [ValidateSet('All', 'ControlCenter', 'Spotify', 'Startup', 'Updates', 'Resources')][string]$Suite = 'All'
+    [ValidateSet('All', 'ControlCenter', 'Spotify', 'Startup', 'Updates', 'Resources', 'Performance')][string]$Suite = 'All'
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -12,7 +12,7 @@ New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $reportName = if ($Suite -eq 'ControlCenter') { 'control-center-results.json' } else { 'results.json' }
 $resultPath = Join-Path $OutputDirectory $reportName
 if (Test-Path -LiteralPath $resultPath) { Remove-Item -LiteralPath $resultPath }
-$entrypoint = if ($Suite -eq 'ControlCenter') { '--control-center-test' } elseif ($Suite -eq 'Spotify') { '--self-test --spotify-only' } elseif ($Suite -eq 'Startup') { '--startup-test' } elseif ($Suite -eq 'Updates') { '--self-test --updates-only' } elseif ($Suite -eq 'Resources') { '--resource-test' } else { '--self-test' }
+$entrypoint = if ($Suite -eq 'ControlCenter') { '--control-center-test' } elseif ($Suite -eq 'Spotify') { '--self-test --spotify-only' } elseif ($Suite -eq 'Startup') { '--startup-test' } elseif ($Suite -eq 'Updates') { '--self-test --updates-only' } elseif ($Suite -eq 'Resources') { '--resource-test' } elseif ($Suite -eq 'Performance') { '--resource-test --performance-profile' } else { '--self-test' }
 # Windows command-line parsing treats a backslash before a closing quote as an
 # escape. Preserve trailing separators, including drive/UNC roots.
 $quotedOutput = '"' + ($OutputDirectory -replace '(\\+)$', '$1$1') + '"'

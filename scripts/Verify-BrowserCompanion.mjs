@@ -21,12 +21,15 @@ function fixture() {
   const onMessage = new Event(), onRemoved = new Event(), onUpdated = new Event();
   let sendMessage = async () => ({ success: false });
   const ports = [];
+  const timers = new Map(), delays = [];
+  let timerId = 0, connectFailure = false;
   const context = vm.createContext({
     navigator: { userAgent: 'Chrome/156' }, Date: { now: () => now },
-    setTimeout: () => 1, clearTimeout: () => {},
+    setTimeout: (callback, delay) => { const id = ++timerId; timers.set(id, callback); delays.push(delay); return id; },
+    clearTimeout: id => timers.delete(id),
     chrome: {
       runtime: { onMessage, onStartup: new Event(), onInstalled: new Event(),
-        connectNative: () => { const port = { onMessage: new Event(), onDisconnect: new Event(), postMessage: message => messages.push(message), disconnect() { this.onDisconnect.emit(); } }; ports.push(port); return port; } },
+        connectNative: () => { if (connectFailure) throw new Error('Host unavailable'); const port = { onMessage: new Event(), onDisconnect: new Event(), postMessage: message => messages.push(message), disconnect() { this.onDisconnect.emit(); } }; ports.push(port); return port; } },
       action: { setBadgeText() {}, setBadgeBackgroundColor() {} },
       tabs: { onRemoved, onUpdated, sendMessage: (...args) => sendMessage(...args) }
     }
@@ -36,9 +39,37 @@ function fixture() {
   const state = (volume = 62) => ({ id: 'm1', title: 'Fixture player', hasMetadata: true, volume, muted: false, playing: true });
   const report = (tabId, documentId = 'document-a', frameId = 0, volume = 62) => onMessage.emit({ type: 'player-states', states: [state(volume)] },
     { tab: { id: tabId, title: 'Fixture player' }, frameId, documentId, url: 'https://fixture.invalid/' }, () => {});
-  return { messages, ports, evaluate, report, state, onMessage, onUpdated, onRemoved,
+  return { messages, ports, evaluate, report, state, onMessage, onUpdated, onRemoved, delays,
+    retry: () => { const [id, callback] = timers.entries().next().value; timers.delete(id); callback(); },
+    failConnect: value => { connectFailure = value; },
     advance: milliseconds => { now += milliseconds; }, setSend: action => { sendMessage = action; } };
 }
+
+const backoff = fixture();
+for (let attempt = 0; attempt < 7; attempt++) {
+  backoff.ports.at(-1).disconnect();
+  const count = backoff.ports.length;
+  backoff.report(1);
+  check(backoff.ports.length === count, 'Media heartbeats respect the pending reconnect delay');
+  backoff.retry();
+}
+check(JSON.stringify(backoff.delays) === JSON.stringify([1000, 2000, 4000, 8000, 16000, 30000, 30000]),
+  'Asynchronous native connection failures exponentially back off and cap at thirty seconds');
+backoff.ports.at(-1).onMessage.emit({ type: 'ready', protocol: 99 });
+backoff.ports.at(-1).disconnect();
+check(backoff.delays.at(-1) === 30000, 'An unsupported handshake does not reset connection backoff');
+backoff.retry();
+backoff.ports.at(-1).onMessage.emit({ type: 'ready', protocol: 1 });
+backoff.ports.at(-1).disconnect();
+check(backoff.delays.at(-1) === 1000, 'A successful protocol handshake restores prompt future recovery');
+backoff.failConnect(true);
+backoff.retry();
+backoff.retry();
+check(backoff.delays.at(-1) === 4000, 'Synchronous host failures preserve the same increasing backoff');
+backoff.failConnect(false);
+backoff.onMessage.emit({ type: 'companion-reconnect' }, {}, () => {});
+check(backoff.evaluate('nativePort !== null && reconnectTimer === 0 && retryDelay === 1000'),
+  'Manual reconnect cancels a delayed retry and connects immediately');
 
 const capacity = fixture();
 check(capacity.evaluate('clipText("x".repeat(511) + "😀",512).length') === 511,

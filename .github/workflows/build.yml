@@ -36,7 +36,9 @@ jobs:
           ./scripts/Invoke-Verification.ps1 -ExecutablePath artifacts/verification/candidate/win-x64/Winisland.exe -Suite Startup -OutputDirectory artifacts/startup-verification
           ./scripts/Invoke-Verification.ps1 -ExecutablePath artifacts/verification/candidate/win-x64/Winisland.exe -Suite Spotify -OutputDirectory artifacts/spotify-verification
           node scripts/Verify-BrowserCompanion.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Browser companion verification failed.' }
           node scripts/Verify-BrowserSafety.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Browser isolation verification failed.' }
       - name: Install Inno Setup compiler
         shell: pwsh
         run: |
@@ -73,7 +75,7 @@ jobs:
           if ($actualHash -ne $expectedHash) { throw 'Verified installer checksum mismatch.' }
           $evidenceDirectory = 'artifacts/release-evidence'
           New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
-          $reportDirectories = @('artifacts/verification', 'artifacts/startup-verification', 'artifacts/spotify-verification', 'artifacts/installer-verification')
+          $reportDirectories = @('artifacts/verification', 'artifacts/startup-verification', 'artifacts/spotify-verification', 'artifacts/browser-companion', 'artifacts/browser-safety', 'artifacts/installer-verification')
           foreach ($directory in $reportDirectories) {
             foreach ($file in (Get-ChildItem -LiteralPath $directory -Recurse -File)) {
               if ($file.Extension -notin '.json', '.png', '.log') { continue }
@@ -116,6 +118,8 @@ jobs:
             artifacts/verification/*.log
             artifacts/startup-verification/**
             artifacts/spotify-verification/*.json
+            artifacts/browser-companion/*.json
+            artifacts/browser-safety/**/*.json
             artifacts/installer-verification/**/*.json
             artifacts/installer-verification/**/*.log
           retention-days: 14
