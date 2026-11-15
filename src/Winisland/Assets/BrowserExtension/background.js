@@ -139,7 +139,13 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (!sender.tab || !Number.isInteger(sender.tab.id) || !/^https?:|^about:blank$/.test(sender.url ?? "")) return;
   if (message?.type === "player-states" && Array.isArray(message.states)) {
     prunePlayers();
-    const framePrefix = `${sender.tab.id}:${sender.frameId}:`;
+    // A departing document can send its final empty report after an iframe has
+    // loaded a replacement. Retire only players belonging to the sender.
+    const framePrefix = `${sender.tab.id}:${sender.frameId}:${sender.documentId ? sender.documentId + ":" : ""}`;
+    if (sender.documentLifecycle && sender.documentLifecycle !== "active") {
+      for (const id of players.keys()) if (id.startsWith(framePrefix)) { players.delete(id); sendNative({ type: "remove", id }); }
+      return;
+    }
     const known = new Set();
     for (const raw of message.states.slice(0, 16)) {
       const state = safeState(raw, sender);

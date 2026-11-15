@@ -26,6 +26,7 @@ internal static class PlayerVolumeVerification
         await VerifyServiceAsync(dispatcher, assert);
         await VerifyBrowserAsync(assert);
         await VerifyBrowserStateNotificationsAsync(assert);
+        await VerifyBrowserReplacementAsync(assert);
         await VerifyUnusedAccessibilityAsync(assert);
         await VerifyAccessibilityAsync(assert);
     }
@@ -307,6 +308,24 @@ internal static class PlayerVolumeVerification
             foreach (var value in values.Values)
                 if ((string)value!.GetType().GetProperty("Id")!.GetValue(value)! == "target:0:1") return value;
             throw new InvalidOperationException("The private browser target fixture is missing.");
+        }
+    }
+
+    private static async Task VerifyBrowserReplacementAsync(Action<bool, string> assert)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        for (var attempt = 0; attempt < 12; attempt++)
+        {
+            using var bridge = new BrowserVolumeBridge();
+            using var connection = new NamedPipeClientStream(".", BrowserVolumeBridge.PipeName, PipeDirection.InOut,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            await connection.ConnectAsync(timeout.Token);
+            await NativeMessagingProtocol.WriteAsync(connection, "{\"type\":\"hello\",\"browser\":\"chrome\"}", timeout.Token);
+            var ready = await NativeMessagingProtocol.ReadAsync(connection, timeout.Token);
+            assert(ready?.Contains("\"ready\"") == true && bridge.IsConnected,
+                "Immediate browser bridge replacement connects to the live bridge rather than a retired listener");
+            // Dispose with the browser connection open and another accept
+            // pending; the next iteration must own both sides of its handshake.
         }
     }
 

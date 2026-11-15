@@ -4,6 +4,8 @@ The calendar and Tools panels use the same black surface, rounded controls, Inte
 
 This is a **local calendar**. Import reads a user-selected `.ics` file up to 1 MB; export writes individual events as RFC 5545 calendar data. Unicode line folding, escaped descriptions, UTC times, named system time zones, and all-day dates are supported. Reimporting the same event updates its stable identity. Recurring events and unavailable custom time zones are counted as skipped, with that result shown to the user. Winisland does not connect to iCloud, Google Calendar, or Microsoft accounts.
 
+Calendar day and week durations follow the event's timezone through clock changes; hour durations measure elapsed time. All-day dates keep their original calendar dates regardless of the local timezone.
+
 Tools keeps five features behind its own navigation strip:
 
 - **Notes:** a scratchpad with 450 ms debounced saving, a character count, and a flush when switching panels, collapsing, or closing. It holds up to 20,000 characters.

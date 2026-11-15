@@ -61,6 +61,19 @@ internal static class SmokeTests
                 return 0;
             }
             Phase("Failure reporting");
+            if (args.Contains("--motion-only"))
+            {
+                await AppleMotionVerification.RunStandaloneAsync(app, output, (condition, name) => Assert(condition, name, results));
+                await File.WriteAllTextAsync(Path.Combine(output, "results.json"), JsonSerializer.Serialize(new { passed = true, results }, new JsonSerializerOptions { WriteIndented = true }));
+                return 0;
+            }
+            Phase("Visibility resource lifecycle");
+            var visibilityMetrics = await VisibilityOptimizationVerification.RunAsync(app, (condition, name) => Assert(condition, name, results));
+            if (args.Contains("--visibility-only"))
+            {
+                await File.WriteAllTextAsync(Path.Combine(output, "results.json"), JsonSerializer.Serialize(new { passed = true, visibilityMetrics, results }, new JsonSerializerOptions { WriteIndented = true }));
+                return 0;
+            }
             VerifyFailureReports(output, (condition, name) => Assert(condition, name, results));
             Phase("Spectrum analysis");
             SpectrumVerification.Run((condition, name) => Assert(condition, name, results));

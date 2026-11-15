@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
@@ -29,6 +30,29 @@ internal static class AppleMotionVerification
         bool SurfaceAnimated, bool ContentAnimated, bool OffsetAnimated, bool MotionPresent,
         Velocity Velocity);
     private sealed record Boundary(Sample Before, Sample After);
+
+    internal static async Task RunStandaloneAsync(App app, string output, Action<bool, string> assert)
+    {
+        BackgroundVerification.RequirePrivateDesktop();
+        var store = new SettingsStore();
+        store.Update(store.Current with { HideInFullscreen = false, ExpandOnHover = false, UseDynamicIsland = false });
+        using var media = new MediaService(app.Dispatcher);
+        using var audio = new AudioService();
+        using var focus = new FocusTimer();
+        using var backend = new PlayerVolumeVerification.FixturePlayerVolumeBackend();
+        using var volume = new PlayerVolumeService(app.Dispatcher, new IPlayerVolumeBackend[] { backend });
+        var notch = new NotchWindow(store, media, audio, focus, new FileShelf(), playerVolume: volume);
+        try
+        {
+            notch.Show();
+            notch.StopPollingForTest();
+            notch.InitializeDeferredPanelsForTest();
+            await app.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+            await RunAsync(app, notch, store, media, output, assert);
+        }
+        finally { notch.CloseForShutdown(); }
+        assert(!notch.IsVisible, "Standalone motion verification closes its own private notch instead of invoking normal collapse-on-close behavior");
+    }
 
     internal static async Task RunAsync(App app, NotchWindow notch, SettingsStore store,
         MediaService media, string output, Action<bool, string> assert)
@@ -156,6 +180,8 @@ internal static class AppleMotionVerification
             assert(samples.TrueForAll(sample => Math.Abs(sample.ScaleX - 1) < 0.000001
                 && Math.Abs(sample.ScaleY - 1) < 0.000001),
                 "Expanded content keeps its native scale on every sampled opening, reversal, closing and pinning frame");
+            await VerifyPanelTransitionsAsync(notch, store, output, frames, assert);
+            await VerifyControlRetargetingAsync(notch, store, frames, assert);
         }
         catch (Exception ex)
         {
@@ -242,6 +268,194 @@ internal static class AppleMotionVerification
             while (timeout.Elapsed < TimeSpan.FromSeconds(3));
             throw new InvalidOperationException($"No rendered mid-transition frame reached {stage}; see apple-motion-runtime.json.");
         }
+    }
+
+    private static async Task VerifyPanelTransitionsAsync(NotchWindow notch, SettingsStore store,
+        string output, RenderingFrames frames, Action<bool, string> assert)
+    {
+        store.Update(store.Current with { UseDynamicIsland = false, ReducedMotion = true });
+        notch.SelectTabForTest("music");
+        notch.Expand(true);
+        var music = (FrameworkElement)notch.FindName("MusicPanel");
+        var files = (FrameworkElement)notch.FindName("FilesPanel");
+        var focus = (FrameworkElement)notch.FindName("FocusPanel");
+        store.Update(store.Current with { ReducedMotion = false });
+        notch.SelectTabForTest("files");
+        assert(files.Visibility == Visibility.Visible && files.Opacity == 0,
+            "A new tab starts transparent before its first rendered frame instead of flashing its future target");
+        notch.SelectTabForTest("music");
+        assert(music.Opacity == 1 && files.Opacity == 0,
+            "A same-frame tab reversal preserves both panels' last presented opacity");
+        await Settled(music, files);
+
+        // Test real rendered interruptions, not fixed delays or future targets.
+        notch.SelectTabForTest("files");
+        await MidTransition(files, () =>
+        {
+            var beforeOpacity = files.Opacity;
+            var beforeOffset = ((TranslateTransform)files.RenderTransform).Y;
+            var beforeVelocity = OffsetVelocity(files);
+            notch.SelectTabForTest("focus");
+            assert(Math.Abs(files.Opacity - beforeOpacity) < 0.000001
+                && Math.Abs(((TranslateTransform)files.RenderTransform).Y - beforeOffset) < 0.000001,
+                "Retargeting a rendered tab entrance preserves its presented opacity and translation");
+            assert(Close(beforeVelocity, OffsetVelocity(files)),
+                "An interrupted panel translation inherits its rendered velocity without an abrupt direction change");
+        });
+        await MidTransition(focus, () => notch.SelectTabForTest("files"));
+        await Settled(files, music, focus);
+        Capture(notch, Path.Combine(output, "apple-panel-motion-files.png"));
+
+        var filesAction = (System.Windows.Controls.Button)notch.FindName("ShelfConnection");
+        assert(filesAction.Focus(), "The panel focus fixture focuses an actual file action on the private desktop");
+        notch.SelectTabForTest("music");
+        assert(!files.IsKeyboardFocusWithin && !files.IsEnabled && music.IsEnabled,
+            "Fading-out tab content immediately yields keyboard focus and disables its actions");
+        await Settled(music, files);
+        var tab = (System.Windows.Controls.RadioButton)notch.FindName("MusicTab");
+        assert(tab.Focus(), "The panel focus fixture focuses the actual header tab");
+        notch.SelectTabForTest("files");
+        assert(tab.IsKeyboardFocused, "Tab transitions preserve focus outside outgoing content");
+        await Settled(files, music);
+
+        notch.SelectTabForTest("focus");
+        await MidTransition(focus, () => store.Update(store.Current with { ReducedMotion = true }));
+        assert(focus.Opacity == 1 && !focus.HasAnimatedProperties
+            && !((TranslateTransform)focus.RenderTransform).HasAnimatedProperties
+            && files.Visibility == Visibility.Collapsed && files.IsEnabled,
+            "Reduced motion cancels panel transitions immediately, releases clocks and restores inactive controls");
+
+        store.Update(store.Current with { UseDynamicIsland = true, ReducedMotion = true });
+        notch.SelectTabForTest("music");
+        notch.Expand(true);
+        var player = (FrameworkElement)notch.FindName("DynamicPlayer");
+        var menu = (FrameworkElement)notch.FindName("IslandMenuPanel");
+        store.Update(store.Current with { ReducedMotion = false });
+        void Invoke(string name) => typeof(NotchWindow).GetMethod(name,
+            BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(notch, null);
+        Invoke("OpenIslandMenu");
+        assert(menu.Opacity == 0, "The activity menu starts at its presented transparent state before rendering");
+        Invoke("CloseIslandMenu");
+        assert(menu.Opacity == 0 && player.Opacity == 1,
+            "A same-frame menu reversal preserves the player and chooser without flashes");
+        await Settled(player, menu);
+        Invoke("OpenIslandMenu");
+        await Settled(menu, player);
+        notch.SelectTabForTest("music");
+        assert(menu.Visibility == Visibility.Visible && menu.Opacity == 1 && player.Opacity == 0,
+            "Choosing the current activity dismisses the chooser through the same smooth transition as another activity");
+        await Settled(player, menu);
+        Invoke("OpenIslandMenu");
+        await MidTransition(menu, () => notch.SelectTabForTest("files"));
+        await Settled(files, player, menu);
+        assert(menu.Visibility == Visibility.Collapsed && !menu.IsKeyboardFocusWithin,
+            "Selecting an activity during menu entrance cancels chooser clocks and hands keyboard focus to the activity");
+        Capture(notch, Path.Combine(output, "apple-panel-motion-island-files.png"));
+
+        async Task MidTransition(FrameworkElement panel, Action change)
+        {
+            var timer = Stopwatch.StartNew();
+            while (timer.ElapsedMilliseconds < 3000)
+            {
+                if (await frames.NextAsync(() =>
+                {
+                    if (panel.Opacity is <= 0.05 or >= 0.95) return false;
+                    change();
+                    return true;
+                })) return;
+            }
+            throw new TimeoutException("Panel motion fixture did not observe a rendered intermediate frame.");
+        }
+
+        async Task Settled(FrameworkElement selected, params FrameworkElement[] outgoing)
+        {
+            var timer = Stopwatch.StartNew();
+            while (timer.ElapsedMilliseconds < 3000)
+            {
+                if (await frames.NextAsync(() => selected.Opacity == 1 && !selected.HasAnimatedProperties
+                    && (selected.RenderTransform is not TranslateTransform translation || !translation.HasAnimatedProperties)
+                    && Array.TrueForAll(outgoing, panel => panel.Visibility == Visibility.Collapsed && !panel.HasAnimatedProperties)))
+                {
+                    assert(true, "Panel transition settles to one visible activity and releases its completed animation clocks");
+                    return;
+                }
+            }
+            throw new TimeoutException("Panel transition did not settle and release its animation clocks.");
+        }
+
+        double OffsetVelocity(FrameworkElement panel)
+        {
+            var motions = (System.Collections.IDictionary)typeof(NotchWindow).GetField("_panelMotions",
+                BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(notch)!;
+            var motion = motions[panel]!;
+            var clock = (AnimationClock)motion.GetType().GetProperty("OffsetClock")!.GetValue(motion)!;
+            var distance = (double)motion.GetType().GetProperty("OffsetDistance")!.GetValue(motion)!;
+            return ClockVelocity(clock, distance);
+        }
+    }
+
+    private static async Task VerifyControlRetargetingAsync(NotchWindow notch, SettingsStore store,
+        RenderingFrames frames, Action<bool, string> assert)
+    {
+        store.Update(store.Current with { UseDynamicIsland = false, ReducedMotion = false });
+        notch.Expand(true);
+        var button = (System.Windows.Controls.Button)notch.FindName("PinButton");
+        var surface = (FrameworkElement)button.Template.FindName("Surface", button);
+        var scale = (ScaleTransform)surface.RenderTransform;
+        void Send(RoutedEvent routedEvent) => button.RaiseEvent(new MouseButtonEventArgs(
+            Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = routedEvent, Handled = true });
+        Send(UIElement.PreviewMouseLeftButtonDownEvent);
+        Send(UIElement.PreviewMouseLeftButtonUpEvent);
+        assert(scale.ScaleX == 1 && scale.ScaleY == 1,
+            "A same-frame control press and release retain the presented scale before rendering");
+        await Rest();
+        Send(UIElement.PreviewMouseLeftButtonDownEvent);
+        var timer = Stopwatch.StartNew();
+        var interrupted = false;
+        while (timer.ElapsedMilliseconds < 3000 && !interrupted)
+            interrupted = await frames.NextAsync(() =>
+            {
+                if (scale.ScaleX is <= 0.971 or >= 0.995) return false;
+                var before = scale.ScaleX;
+                var velocity = Velocity();
+                Send(UIElement.PreviewMouseLeftButtonUpEvent);
+                assert(Math.Abs(scale.ScaleX - before) < 0.000001 && Math.Abs(scale.ScaleY - before) < 0.000001,
+                    "Releasing during a rendered button press keeps its presented scale on both axes");
+                assert(Close(velocity, Velocity()),
+                    "Button release preserves the press spring's rendered velocity as it returns to native scale");
+                return true;
+            });
+        assert(interrupted, "The control fixture observes an actual intermediate press frame");
+        await Rest();
+
+        double Velocity()
+        {
+            var property = (DependencyProperty)typeof(InteractionMotion).GetField("AnimationClockProperty",
+                BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+            var motion = surface.GetValue(property);
+            var clock = (AnimationClock)motion.GetType().GetProperty("ClockX")!.GetValue(motion)!;
+            var distance = (double)motion.GetType().GetProperty("DistanceX")!.GetValue(motion)!;
+            return ClockVelocity(clock, distance);
+        }
+
+        async Task Rest()
+        {
+            var timer = Stopwatch.StartNew();
+            while (timer.ElapsedMilliseconds < 3000)
+                if (await frames.NextAsync(() => scale.ScaleX == 1 && scale.ScaleY == 1 && !scale.HasAnimatedProperties))
+                {
+                    assert(true, "Retargeted button feedback returns to native scale and releases both completed clocks");
+                    return;
+                }
+            throw new TimeoutException("Button feedback did not release its animation clocks.");
+        }
+    }
+
+    private static double ClockVelocity(AnimationClock clock, double distance)
+    {
+        var animation = (DoubleAnimation)clock.Timeline;
+        var seconds = animation.Duration.TimeSpan.TotalSeconds;
+        return NumericalDerivative(animation.EasingFunction!, (clock.CurrentTime?.TotalSeconds ?? 0) / seconds) * distance / seconds;
     }
 
     private static bool SamePosition(Sample before, Sample after) => Math.Abs(before.Width - after.Width) < 0.01

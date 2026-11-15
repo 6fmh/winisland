@@ -28,6 +28,8 @@ public sealed class SpotifyPlayerVolume : IPlayerVolumeBackend, IPlayerVolumeNot
     private IntPtr _windowHandle;
     private uint _windowProcess;
     private bool _disposed;
+    private Task<PlayerVolumeSnapshot>? _localRead;
+    private readonly CancellationTokenSource _lifetime = new();
     public SpotifyAccount? Account { get; }
     public event EventHandler? Changed;
     public SpotifyPlayerVolume()
@@ -35,7 +37,12 @@ public sealed class SpotifyPlayerVolume : IPlayerVolumeBackend, IPlayerVolumeNot
         Account = new SpotifyAccount();
         Account.Changed += OnAccountChanged;
     }
-    internal SpotifyPlayerVolume(Func<AutomationElement?> rootProvider) => _rootProvider = rootProvider;
+    internal SpotifyPlayerVolume(Func<AutomationElement?> rootProvider, SpotifyAccount? account = null)
+    {
+        _rootProvider = rootProvider;
+        Account = account;
+        if (Account is not null) Account.Changed += OnAccountChanged;
+    }
     private void OnAccountChanged(object? sender, EventArgs args) => Changed?.Invoke(this, EventArgs.Empty);
     public static bool IsSpotifySource(string source) => source.Equals("Spotify", StringComparison.OrdinalIgnoreCase)
         || source.Equals("Spotify.exe", StringComparison.OrdinalIgnoreCase)
@@ -45,21 +52,43 @@ public sealed class SpotifyPlayerVolume : IPlayerVolumeBackend, IPlayerVolumeNot
 
     public async Task<PlayerVolumeSnapshot> ReadAsync(MediaSnapshot media, CancellationToken cancellationToken)
     {
-        var local = await ReadLocalAsync(media, cancellationToken);
-        if (Account?.IsConnected != true) return local;
+        cancellationToken.ThrowIfCancellationRequested();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (Account?.IsConnected != true) return await ReadLocalAsync(media, cancellationToken);
+        // Account volume must not wait for another process's accessibility
+        // provider. Keep one native read in flight for notifications/fallback.
+        if (_localRead is null || _localRead.IsCompleted)
+            _localRead = ReadLocalSafelyAsync(media, _lifetime.Token);
         var report = Volatile.Read(ref _reportedVolume);
         if (report is not null && report != _consumedReport)
         {
             Account.ObserveLocalVolume(report.Volume, report.ReportedAt);
             _consumedReport = report;
         }
-        return await Account.ReadAsync(media, cancellationToken);
+        var account = await Account.ReadAsync(media, cancellationToken);
+        if (account.Available) return account;
+        try
+        {
+            var local = await _localRead.WaitAsync(TimeSpan.FromMilliseconds(500), cancellationToken);
+            if (local.Available && local.Source == media.Source)
+                return local with { ConnectionHint = "Spotify desktop controls · " + Account.Status };
+        }
+        catch (TimeoutException) { }
+        return account;
+    }
+
+    private async Task<PlayerVolumeSnapshot> ReadLocalSafelyAsync(MediaSnapshot media, CancellationToken cancellationToken)
+    {
+        try { return await ReadLocalAsync(media, cancellationToken).ConfigureAwait(false); }
+        catch (Exception ex) when (ex is ElementNotAvailableException or InvalidOperationException or COMException
+            or ArgumentException or ObjectDisposedException or OperationCanceledException)
+        { return new PlayerVolumeSnapshot { Source = media.Source, Player = "Spotify" }; }
     }
 
     private Task<PlayerVolumeSnapshot> ReadLocalAsync(MediaSnapshot media, CancellationToken cancellationToken) => _automation.InvokeAsync(() =>
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var snapshot = new PlayerVolumeSnapshot { Source = media.Source, Player = "Spotify", ConnectionHint = "Open Player controls in Settings and choose Connect Spotify." };
+        var snapshot = new PlayerVolumeSnapshot { Source = media.Source, Player = "Spotify", ConnectionHint = "Open Player controls in Settings to reconnect local controls or connect your Spotify account." };
         if (_disposed || !Supports(media)) return snapshot;
         try
         {
@@ -335,8 +364,10 @@ public sealed class SpotifyPlayerVolume : IPlayerVolumeBackend, IPlayerVolumeNot
     {
         if (_disposed) return;
         _disposed = true;
+        _lifetime.Cancel();
         if (Account is not null) { Account.Changed -= OnAccountChanged; Account.Dispose(); }
         _automation.Dispose(ForgetSlider);
+        _lifetime.Dispose();
     }
 
     private void ForgetSlider()

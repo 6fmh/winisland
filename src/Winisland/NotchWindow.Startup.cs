@@ -46,7 +46,7 @@ public partial class NotchWindow
         {
             if (_closed || _runtimeStarted || _pollingSuppressedForTest) return;
             _runtimeStarted = true;
-            _playerVolume.Start(); StartAppleDevices(); _pulse.Start(); _playerPoll.Start();
+            _playerVolume.Start(); StartAppleDevices(); _pulse.Start(); UpdateResourceDemand();
         }, DispatcherPriority.Background);
         // Load only reminder data while idle; both secondary panels stay lazy.
         Dispatcher.BeginInvoke(() => { if (!_closed) EnsureReminders(); }, DispatcherPriority.ApplicationIdle);

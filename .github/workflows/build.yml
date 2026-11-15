@@ -14,6 +14,8 @@ jobs:
   verify:
     runs-on: windows-2025
     timeout-minutes: 25
+    env:
+      WINISLAND_SPOTIFY_CLIENT_ID: ${{ vars.SPOTIFY_CLIENT_ID }}
     permissions:
       contents: write
     steps:
@@ -27,6 +29,9 @@ jobs:
           $version = ([xml](Get-Content src/Winisland/Winisland.csproj)).Project.PropertyGroup.Version
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version.' }
           if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag must match project version.' }
+          $spotifyClientId = $env:WINISLAND_SPOTIFY_CLIENT_ID
+          if (!$spotifyClientId) { $spotifyClientId = @(([xml](Get-Content src/Winisland/Winisland.csproj)).Project.PropertyGroup.SpotifyClientId)[-1].InnerText }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $spotifyClientId -notmatch '^[a-fA-F0-9]{32}$') { throw 'A Winisland-owned Spotify Client ID is required to release account sign-in.' }
       - name: Verify native application on a private desktop
         shell: pwsh
         run: ./scripts/Build.ps1 -Verify

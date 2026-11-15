@@ -97,6 +97,22 @@ check(navigation.evaluate('players.size') === 1 && navigation.evaluate('Array.fr
 navigation.onRemoved.emit(2);
 check(navigation.evaluate('players.size') === 0, 'Closing a tab removes its remaining targets');
 
+const departing = fixture();
+departing.report(1, 'departing-document', 2, 62);
+departing.report(1, 'replacement-document', 2, 85);
+departing.onMessage.emit({ type: 'player-states', states: [] },
+  { tab: { id: 1 }, frameId: 2, documentId: 'departing-document', documentLifecycle: 'pending_deletion', url: 'https://fixture.invalid/' }, () => {});
+check(departing.evaluate('players.size') === 1 && departing.evaluate('players.get("1:2:replacement-document:m1")?.volume') === 85,
+  'A departing iframe cannot remove the replacement document player with a delayed empty report');
+departing.onMessage.emit({ type: 'player-states', states: [departing.state(12)] },
+  { tab: { id: 1 }, frameId: 2, documentId: 'departing-document', documentLifecycle: 'pending_deletion', url: 'https://fixture.invalid/' }, () => {});
+check(departing.evaluate('players.size') === 1,
+  'An inactive browser document cannot reintroduce obsolete media players');
+departing.onMessage.emit({ type: 'player-states', states: [] },
+  { tab: { id: 1 }, frameId: 2, documentId: 'replacement-document', url: 'https://fixture.invalid/' }, () => {});
+check(departing.evaluate('players.size') === 0,
+  'An active document empty report still removes its own player');
+
 const race = fixture();
 race.report(1);
 let finish;

@@ -3,9 +3,14 @@ param(
     [switch]$Verify,
     [ValidateSet('win-x64', 'win-arm64')][string]$Runtime = 'win-x64',
     [string]$OutputDirectory,
-    [switch]$PrivateBuild
+    [switch]$PrivateBuild,
+    [string]$SpotifyClientId = $env:WINISLAND_SPOTIFY_CLIENT_ID
 )
 $ErrorActionPreference = 'Stop'
+$SpotifyClientId = ([string]$SpotifyClientId).Trim()
+if ($SpotifyClientId -and $SpotifyClientId -notmatch '^[a-fA-F0-9]{32}$') {
+    throw 'SpotifyClientId must be the public 32-character app Client ID, not a client secret.'
+}
 if ($Verify) {
     $hostRuntime = 'win-' + [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
     if ($Runtime -ne $hostRuntime) { throw "Verification requires the matching Windows architecture ($hostRuntime)." }
@@ -43,6 +48,7 @@ $publishArguments = @('publish', (Join-Path $projectRoot 'src/Winisland/Winislan
     '-p:DebugType=None', '-p:DebugSymbols=false', '-o', $publishDirectory, '--nologo')
 # Portable images target the minimum supported .NET 8 references. Self-contained
 # installers use the SDK's current patched runtime.
+if ($SpotifyClientId) { $publishArguments += "-p:SpotifyClientId=$SpotifyClientId" }
 if (!$SelfContained) { $publishArguments += '-p:TargetLatestRuntimePatch=false' }
 & $buildTool @publishArguments
 if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }

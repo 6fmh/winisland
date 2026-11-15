@@ -15,6 +15,7 @@ public sealed record PlayerVolumeSnapshot
     public string Source { get; init; } = "";
     public string Player { get; init; } = "Player";
     public string ConnectionHint { get; init; } = "Play something to control its player volume.";
+    public string ConnectionAction { get; init; } = "";
     public string TargetId { get; init; } = "";
 }
 
@@ -44,9 +45,12 @@ public sealed class PlayerVolumeService : IDisposable
     private MediaSnapshot _media = new();
     private PlayerVolumeSnapshot? _pending;
     private bool _readRequested, _disposed;
+    private bool _pollingEnabled = true;
+    private bool _activeRefresh;
     private long _generation, _nextRead, _lastFailure;
     private Task _pump = Task.CompletedTask;
     private double _unmutedVolume = 50;
+    private int _backendRefreshQueued;
     public PlayerVolumeSnapshot Current { get; private set; } = new();
     public bool BrowserConnected => _browser?.IsConnected ?? false;
     public SpotifyAccount? SpotifyAccount { get { Start(); return _backends.OfType<SpotifyPlayerVolume>().FirstOrDefault()?.Account; } }
@@ -76,7 +80,7 @@ public sealed class PlayerVolumeService : IDisposable
             _backends = new IPlayerVolumeBackend[] { new SpotifyPlayerVolume(), _browser };
         }
         foreach (var backend in _backends.OfType<IPlayerVolumeNotifications>()) backend.Changed += OnBackendChanged;
-        _nextRead = 0; _readRequested = true; StartPump();
+        _nextRead = 0; _readRequested = _pollingEnabled; StartPump();
     }
 
     public void SetSource(MediaSnapshot media)
@@ -92,14 +96,27 @@ public sealed class PlayerVolumeService : IDisposable
         _sourceLifetime = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         _pending = null; _nextRead = 0; _unmutedVolume = 50;
         Publish(Unavailable(media));
-        _readRequested = true;
+        _readRequested = _pollingEnabled;
         StartPump();
+    }
+
+    // Suspend view-driven discovery while retaining backend change events and
+    // queued writes/readbacks. Opening never waits for the old poll deadline.
+    internal void SetPollingEnabled(bool enabled)
+    {
+        if (_disposed) return;
+        if (!_dispatcher.CheckAccess()) { _dispatcher.BeginInvoke(() => SetPollingEnabled(enabled)); return; }
+        if (_pollingEnabled == enabled) return;
+        _pollingEnabled = enabled;
+        _readRequested = false;
+        if (enabled) { _nextRead = 0; Refresh(true); }
     }
 
     public void Refresh(bool active)
     {
-        if (_disposed) return;
+        if (_disposed || !_pollingEnabled) return;
         if (!_dispatcher.CheckAccess()) { _dispatcher.BeginInvoke(() => Refresh(active)); return; }
+        _activeRefresh = active;
         var now = Environment.TickCount64;
         if (now < _nextRead || !Current.Available && !_media.HasSession) return;
         _nextRead = now + (Current.Available ? active ? 150 : 1000 : 2000);
@@ -203,6 +220,7 @@ public sealed class PlayerVolumeService : IDisposable
                 if (generation != _generation || _disposed || _pending is not null) continue;
                 if (!double.IsFinite(snapshot.Volume)) snapshot = Unavailable(media);
                 snapshot = snapshot with { Volume = Math.Clamp(snapshot.Volume, 0, 100), Source = media.Source };
+                if (snapshot.Available) _nextRead = Math.Min(_nextRead, Environment.TickCount64 + (_activeRefresh ? 150 : 1000));
                 if (snapshot.Available && !snapshot.Muted && snapshot.Volume > 0) _unmutedVolume = snapshot.Volume;
                 Publish(snapshot);
             }
@@ -224,7 +242,7 @@ public sealed class PlayerVolumeService : IDisposable
     {
         Source = media.Source,
         ConnectionHint = !media.HasSession ? "Play something to control its player volume."
-            : SpotifyPlayerVolume.IsSpotifySource(media.Source) ? "Open Player controls in Settings and choose Connect Spotify."
+            : SpotifyPlayerVolume.IsSpotifySource(media.Source) ? "Open Player controls in Settings to reconnect local controls or connect your Spotify account."
             : BrowserVolumeBridge.IsBrowserSource(media.Source) ? "Connect the browser companion to control this player's volume."
             : "This app does not expose its own player volume."
     };
@@ -246,12 +264,16 @@ public sealed class PlayerVolumeService : IDisposable
 
     private void OnBackendChanged(object? sender, EventArgs e)
     {
-        if (_disposed || _dispatcher.HasShutdownStarted) return;
+        if (_disposed || _dispatcher.HasShutdownStarted || Interlocked.Exchange(ref _backendRefreshQueued, 1) != 0) return;
         _dispatcher.BeginInvoke(() =>
         {
+            Interlocked.Exchange(ref _backendRefreshQueued, 0);
             if (_disposed) return;
             _nextRead = 0;
-            Refresh(true);
+            // An actual backend event can still update the closed-notch HUD;
+            // it does not restart recurring view polling.
+            _readRequested = true;
+            StartPump();
             // Connection status matters even when the media identity is absent.
             Changed?.Invoke(this, EventArgs.Empty);
         }, DispatcherPriority.DataBind);

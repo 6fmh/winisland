@@ -117,7 +117,7 @@ Start playback in an app that exposes a Windows media session. Winisland shows t
 
 For **Comet, Chrome, Edge, Brave, and compatible Chromium browsers**, open **Settings → Player controls** and follow the companion-extension instructions. Load the bundled folder from the browser's extensions page and reload already-open media tabs. The companion connects locally and controls supported HTML5 and YouTube players. [Browser companion installation and permissions](src/Winisland/Assets/BrowserExtension/README.md).
 
-**Spotify desktop** can use its accessible volume control when available; some versions expose 10% steps. Optional Spotify account integration supports 1% changes and requires Premium plus a Spotify developer app. [Player volume and Spotify setup](docs/player-volume.md).
+**Spotify desktop** can use its accessible volume control when available; some versions expose 10% steps. Optional Spotify account integration supports 1% changes with Premium: choose **Connect Spotify** and authorize Winisland in your browser. Account sign-in requires a build configured with Winisland's Spotify app registration. [Player volume and Spotify setup](docs/player-volume.md).
 
 ### File shelf and ShareX uploads
 

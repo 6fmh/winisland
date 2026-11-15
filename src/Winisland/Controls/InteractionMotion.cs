@@ -17,7 +17,9 @@ public static class InteractionMotion
     private static readonly DependencyProperty OwnerMotionProperty = DependencyProperty.RegisterAttached(
         "OwnerMotion", typeof(OwnerMotion), typeof(InteractionMotion), new PropertyMetadata(null));
     private static readonly DependencyProperty AnimationClockProperty = DependencyProperty.RegisterAttached(
-        "AnimationClock", typeof(AnimationClock), typeof(InteractionMotion), new PropertyMetadata(null));
+        "AnimationClock", typeof(ControlMotion), typeof(InteractionMotion), new PropertyMetadata(null));
+    private sealed record ControlMotion(AnimationClock ClockX, AnimationClock ClockY,
+        SpringEase EaseX, SpringEase EaseY, double DistanceX, double DistanceY);
 
     public static bool GetEnabled(DependencyObject element) => (bool)element.GetValue(EnabledProperty);
     public static void SetEnabled(DependencyObject element, bool value) => element.SetValue(EnabledProperty, value);
@@ -179,17 +181,38 @@ public static class InteractionMotion
         var fromY = scale.ScaleY;
         if (!scale.HasAnimatedProperties && Math.Abs(fromX - target) < 0.000001
             && Math.Abs(fromY - target) < 0.000001) return;
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var seconds = duration / 1000.0;
+        var velocityX = 0.0;
+        var velocityY = 0.0;
+        if (element.GetValue(AnimationClockProperty) is ControlMotion previous)
+        {
+            velocityX = previous.DistanceX * previous.EaseX.VelocityAt(
+                (previous.ClockX.CurrentTime?.TotalSeconds ?? 0) / previous.EaseX.AnimationSeconds);
+            velocityY = previous.DistanceY * previous.EaseY.VelocityAt(
+                (previous.ClockY.CurrentTime?.TotalSeconds ?? 0) / previous.EaseY.AnimationSeconds);
+        }
+        SpringEase Ease(double distance, double velocity) => new()
+        {
+            DampingRatio = 1, ResponseSeconds = seconds * 0.9, AnimationSeconds = seconds,
+            InitialVelocity = Math.Abs(distance) > 0.000001 ? velocity / distance : 0
+        };
+        var easeX = Ease(target - fromX, velocityX);
+        var easeY = Ease(target - fromY, velocityY);
         var clockX = new DoubleAnimation(fromX, target, TimeSpan.FromMilliseconds(duration))
-            { EasingFunction = ease }.CreateClock();
+            { EasingFunction = easeX }.CreateClock();
         var clockY = new DoubleAnimation(fromY, target, TimeSpan.FromMilliseconds(duration))
-            { EasingFunction = ease }.CreateClock();
-        element.SetValue(AnimationClockProperty, clockX);
+            { EasingFunction = easeY }.CreateClock();
+        var motion = new ControlMotion(clockX, clockY, easeX, easeY, target - fromX, target - fromY);
+        element.SetValue(AnimationClockProperty, motion);
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        scale.ScaleX = fromX;
+        scale.ScaleY = fromY;
         clockX.Completed += (_, _) =>
         {
             // An interrupted clock must never clear its replacement. Once this
             // transition settles, release both clocks instead of holding them.
-            if (!ReferenceEquals(element.GetValue(AnimationClockProperty), clockX)) return;
+            if (!ReferenceEquals(element.GetValue(AnimationClockProperty), motion)) return;
             scale.ScaleX = scale.ScaleY = target;
             scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
             scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);

@@ -24,6 +24,8 @@ public sealed class SpotifyAccount : IDisposable
     private readonly HttpClient _http;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly string _signInClientId;
+    private readonly Action<Uri> _openAuthorization;
     private Credentials? _credentials;
     private string _accessToken = "";
     private long _expiresAt, _nextRead, _retryAt, _holdUntil, _lastWriteStarted, _generation;
@@ -31,14 +33,18 @@ public sealed class SpotifyAccount : IDisposable
     private bool _disposed;
     private string CredentialPath => Path.Combine(SettingsStore.DirectoryPath, "spotify-account.bin");
     public bool IsConnected => _credentials is not null;
+    public bool CanConnect => _signInClientId.Length > 0;
     public string ClientId => _credentials?.ClientId ?? "";
     public string Status { get; private set; } = "Account not connected";
     public event EventHandler? Changed;
 
     public SpotifyAccount() : this(new HttpClient { Timeout = TimeSpan.FromSeconds(8) }, true) { }
-    internal SpotifyAccount(HttpClient http, bool loadCredentials)
+    internal SpotifyAccount(HttpClient http, bool loadCredentials, string? clientId = null, Action<Uri>? openAuthorization = null)
     {
         _http = http;
+        _signInClientId = SpotifyAppRegistration.NormalizeClientId(clientId ?? SpotifyAppRegistration.ClientId);
+        _openAuthorization = openAuthorization ?? (uri => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }));
+        if (!CanConnect) Status = SpotifyAppRegistration.UnavailableMessage;
         if (!loadCredentials) return;
         try
         {
@@ -53,18 +59,17 @@ public sealed class SpotifyAccount : IDisposable
                     _credentials = credentials;
                 }
                 finally { CryptographicOperations.ZeroMemory(bytes); }
-                if (_credentials is not null) Status = "Account connected · 1% volume steps";
+                if (_credentials is not null) Status = "Signed in to Spotify";
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException or JsonException or ArgumentException)
         { Status = "Reconnect your Spotify account"; }
     }
 
-    public async Task ConnectAsync(string clientId, CancellationToken cancellationToken = default)
+    public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
-        clientId = clientId.Trim();
-        if (clientId.Length != 32 || !clientId.All(char.IsAsciiHexDigit))
-            throw new ArgumentException("Enter the 32-character Client ID from your Spotify Developer Dashboard.");
+        if (!CanConnect) throw new InvalidOperationException(SpotifyAppRegistration.UnavailableMessage);
+        var clientId = _signInClientId;
         using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
         operation.CancelAfter(TimeSpan.FromMinutes(3));
         var token = operation.Token;
@@ -84,7 +89,7 @@ public sealed class SpotifyAccount : IDisposable
                 ["scope"] = "user-read-playback-state user-modify-playback-state", ["state"] = state,
                 ["code_challenge_method"] = "S256", ["code_challenge"] = challenge
             });
-            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            _openAuthorization(new Uri(url));
             var code = await ReceiveAuthorizationAsync(listener, state, token);
             token.ThrowIfCancellationRequested();
             if (_disposed || generation != _generation) throw new OperationCanceledException(token);
@@ -105,7 +110,7 @@ public sealed class SpotifyAccount : IDisposable
             ["grant_type"] = "authorization_code", ["code"] = code, ["redirect_uri"] = RedirectUri,
             ["client_id"] = clientId, ["code_verifier"] = verifier
         }), token);
-        if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Spotify could not finish sign-in. Check the app's Client ID, redirect URI, and allowed users.");
+        if (!response.IsSuccessStatusCode) throw new InvalidOperationException("Spotify could not finish sign-in. Try again. If this continues, contact Winisland support.");
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
         token.ThrowIfCancellationRequested();
         if (_disposed || generation != _generation) throw new OperationCanceledException(token);
@@ -119,7 +124,7 @@ public sealed class SpotifyAccount : IDisposable
         ++_generation;
         SetAccessToken(root);
         _current = new(); _nextRead = _retryAt = _holdUntil = 0;
-        Status = "Account connected · 1% volume steps";
+        Status = "Signed in to Spotify";
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -141,7 +146,8 @@ public sealed class SpotifyAccount : IDisposable
         var token = operation.Token;
         await _gate.WaitAsync(token);
         var generation = _generation;
-        var missing = new PlayerVolumeSnapshot { Source = media.Source, Player = "Spotify", Step = 1, ConnectionHint = Status };
+        var missing = new PlayerVolumeSnapshot { Source = media.Source, Player = "Spotify", Step = 1, ConnectionHint = Status,
+            ConnectionAction = IsConnected ? "Check Spotify account connection" : "Connect Spotify" };
         try
         {
             if (!IsConnected || _disposed) return missing;
@@ -154,14 +160,23 @@ public sealed class SpotifyAccount : IDisposable
             if (response.StatusCode == HttpStatusCode.NoContent)
             {
                 Status = "Start Spotify playback on this PC to use account volume.";
-                return _current = missing with { ConnectionHint = Status };
+                return _current = missing with { ConnectionHint = Status, ConnectionAction = "Start playback in Spotify" };
             }
             if (!response.IsSuccessStatusCode)
             {
-                Status = response.StatusCode == HttpStatusCode.Forbidden
-                    ? "Spotify API access requires Premium and an account allowed in your app's dashboard."
-                    : "Spotify is temporarily unavailable. Try again shortly.";
-                return _current = missing with { ConnectionHint = Status };
+                if (response.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    var error = await response.Content.ReadAsStringAsync(token);
+                    if (_disposed || generation != _generation) return missing with { ConnectionHint = Status };
+                    var approvalMissing = error.Contains("user may not be registered", StringComparison.OrdinalIgnoreCase);
+                    Status = approvalMissing
+                        ? "Signed in, but Spotify hasn't approved this account for Winisland. The app owner must add it to User Management."
+                        : "Spotify refused playback access. Check that your account has Premium and is approved for Winisland.";
+                    return _current = missing with { ConnectionHint = Status,
+                        ConnectionAction = approvalMissing ? "Spotify account needs approval" : "Spotify playback access unavailable" };
+                }
+                Status = "Spotify is temporarily unavailable. Try again shortly.";
+                return _current = missing with { ConnectionHint = Status, ConnectionAction = "Spotify is unavailable" };
             }
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
             if (_disposed || generation != _generation) return missing with { ConnectionHint = Status };
@@ -171,13 +186,13 @@ public sealed class SpotifyAccount : IDisposable
                 || !volume.TryGetDouble(out var level) || !double.IsFinite(level) || level is < 0 or > 100)
             {
                 Status = "Select " + Environment.MachineName + " in Spotify's device menu. Account volume controls this PC only.";
-                return _current = missing with { ConnectionHint = Status };
+                return _current = missing with { ConnectionHint = Status, ConnectionAction = "Select this PC in Spotify" };
             }
             var id = "spotify-api:" + device.GetProperty("id").GetString();
             if (now < _holdUntil && _current.TargetId == id) return _current with { Source = media.Source };
             Status = "Account connected · 1% volume steps";
             return _current = missing with { Available = true, Volume = Math.Clamp(level, 0, 100), Muted = level == 0,
-                TargetId = id, ConnectionHint = "Spotify account · " + Environment.MachineName };
+                TargetId = id, ConnectionHint = "Spotify account · " + Environment.MachineName, ConnectionAction = "" };
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException && !token.IsCancellationRequested)
         {

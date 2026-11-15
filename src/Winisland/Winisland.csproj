@@ -11,8 +11,10 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets/Winisland.ico</ApplicationIcon>
     <AssemblyName>Winisland</AssemblyName>
-    <Version>0.6.0</Version>
+    <Version>0.7.0</Version>
     <WinislandPrivateBuild Condition="'$(WinislandPrivateBuild)' == ''">false</WinislandPrivateBuild>
+    <SpotifyClientId Condition="'$(SpotifyClientId)' == ''">$(WINISLAND_SPOTIFY_CLIENT_ID)</SpotifyClientId>
+    <SpotifyClientId Condition="'$(SpotifyClientId)' == ''">990d5c6cc850485588e6518a5a7e3a24</SpotifyClientId>
     <RepositoryUrl>https://github.com/6fmh/winisland</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <Authors>6fmh</Authors>
@@ -21,7 +23,11 @@
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="WinislandPrivateBuild" Value="$(WinislandPrivateBuild)" />
+    <AssemblyMetadata Include="SpotifyClientId" Value="$(SpotifyClientId)" />
   </ItemGroup>
+  <Target Name="ValidateSpotifyRegistration" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(SpotifyClientId)' != '' and !$([System.Text.RegularExpressions.Regex]::IsMatch('$(SpotifyClientId)', '^[a-fA-F0-9]{32}$'))" Text="SpotifyClientId must be a 32-character public Spotify app Client ID. Never supply a client secret." />
+  </Target>
   <ItemGroup><Resource Include="Assets/Winisland.png" /></ItemGroup>
   <ItemGroup>
     <Resource Include="Assets/Fonts/*.ttf" />

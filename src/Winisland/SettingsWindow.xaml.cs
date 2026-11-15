@@ -22,6 +22,7 @@ public partial class SettingsWindow : Window
     private bool _loading = true;
     private bool _connectingSpotify;
     private bool _connectingSpotifyAccount;
+    private bool _playerSubscribed, _closed;
     private string _selectedPage = "general";
     private readonly Dictionary<string, double> _pageOffsets = new();
     private readonly CancellationTokenSource _spotifySignIn = new();
@@ -43,13 +44,14 @@ public partial class SettingsWindow : Window
         SelectPage("general");
         RefreshUploadConnection();
         RefreshPlayerConnection();
-        SpotifyClientIdInput.Text = _playerVolume?.SpotifyAccount?.ClientId ?? "";
-        if (_playerVolume is not null) _playerVolume.Changed += OnPlayerConnectionChanged;
-        Activated += (_, _) => RefreshPlayerConnection();
+        IsVisibleChanged += (_, _) => SynchronizePlayerSubscription();
+        StateChanged += (_, _) => SynchronizePlayerSubscription();
+        Activated += (_, _) => { if (_selectedPage == "players") RefreshPlayerConnection(); };
         Closed += (_, _) =>
         {
+            _closed = true;
             _spotifySignIn.Cancel(); _spotifySignIn.Dispose();
-            if (_playerVolume is not null) _playerVolume.Changed -= OnPlayerConnectionChanged;
+            SynchronizePlayerSubscription();
         };
     }
 
@@ -147,6 +149,7 @@ public partial class SettingsWindow : Window
         if (page is not ("general" or "appearance" or "activities" or "players" or "uploads" or "about")) return;
         _pageOffsets[_selectedPage] = PageScroll.VerticalOffset;
         _selectedPage = page;
+        SynchronizePlayerSubscription();
         GeneralPanel.Visibility = page == "general" ? Visibility.Visible : Visibility.Collapsed;
         AppearancePanel.Visibility = page == "appearance" ? Visibility.Visible : Visibility.Collapsed;
         ActivitiesPanel.Visibility = page == "activities" ? Visibility.Visible : Visibility.Collapsed;
@@ -162,6 +165,14 @@ public partial class SettingsWindow : Window
         PageScroll.ScrollToVerticalOffset(_pageOffsets.GetValueOrDefault(page));
     }
     private void OnPlayerConnectionChanged(object? sender, EventArgs args) => RefreshPlayerConnection();
+    private void SynchronizePlayerSubscription()
+    {
+        var subscribe = !_closed && IsVisible && WindowState != WindowState.Minimized && _selectedPage == "players" && _playerVolume is not null;
+        if (_playerSubscribed == subscribe) return;
+        _playerSubscribed = subscribe;
+        if (subscribe) { _playerVolume!.Changed += OnPlayerConnectionChanged; RefreshPlayerConnection(); }
+        else if (_playerVolume is not null) _playerVolume.Changed -= OnPlayerConnectionChanged;
+    }
     private void RefreshPlayerConnection()
     {
         if (BrowserConnectionStatus is null) return;
@@ -170,9 +181,9 @@ public partial class SettingsWindow : Window
         BrowserConnectionDot.Fill = new SolidColorBrush(connected ? Color.FromRgb(40, 180, 85) : Color.FromRgb(160, 160, 168));
         ConnectSpotifyButton.IsEnabled = _playerVolume is not null && !_connectingSpotify;
         var account = _playerVolume?.SpotifyAccount;
-        ConnectSpotifyAccountButton.IsEnabled = account is not null && !_connectingSpotifyAccount;
+        ConnectSpotifyAccountButton.IsEnabled = account?.CanConnect == true && !_connectingSpotifyAccount;
+        ConnectSpotifyAccountButton.Content = account?.IsConnected == true ? "Switch Spotify account" : "Connect Spotify";
         DisconnectSpotifyAccountButton.IsEnabled = account?.IsConnected == true && !_connectingSpotifyAccount;
-        SpotifyClientIdInput.IsEnabled = !_connectingSpotifyAccount;
         if (!_connectingSpotifyAccount) SpotifyAccountStatus.Text = account?.Status ?? "Account connection unavailable in this session";
     }
     private async void OnConnectSpotify(object sender, RoutedEventArgs args)
@@ -183,7 +194,7 @@ public partial class SettingsWindow : Window
         SpotifySetupStatus.Text = "Connecting to Spotify…";
         try
         {
-            var connected = await _playerVolume.PrepareSpotifyAccessibilityAsync();
+            var connected = await _playerVolume.PrepareSpotifyAccessibilityAsync(_spotifySignIn.Token);
             if (IsLoaded)
                 SpotifySetupStatus.Text = connected
                     ? "Spotify's local controls connected. Connect your account below for 1% volume steps."
@@ -202,16 +213,16 @@ public partial class SettingsWindow : Window
     private async void OnConnectSpotifyAccount(object sender, RoutedEventArgs args)
     {
         var account = _playerVolume?.SpotifyAccount;
-        if (account is null || _connectingSpotifyAccount) return;
+        if (account?.CanConnect != true || _connectingSpotifyAccount) return;
         _connectingSpotifyAccount = true;
         RefreshPlayerConnection();
         SpotifyAccountStatus.Text = "Finish signing in in your browser. This window can stay open.";
         string? error = null;
-        try { await account.ConnectAsync(SpotifyClientIdInput.Text, _spotifySignIn.Token); }
+        try { await account.ConnectAsync(_spotifySignIn.Token); }
         catch (OperationCanceledException) { error = "Sign-in timed out or was canceled. Try signing in again."; }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { error = ex.Message; }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
-        { error = "Couldn't connect. Check your internet connection and Spotify app settings, then try again."; }
+        { error = "Couldn't connect. Check your internet connection, then try again."; }
         finally
         {
             _connectingSpotifyAccount = false;
@@ -230,11 +241,6 @@ public partial class SettingsWindow : Window
         { SpotifyAccountStatus.Text = "Couldn't remove the saved connection. Try restarting Winisland."; }
     }
 
-    private void OnOpenSpotifyDashboard(object sender, RoutedEventArgs args)
-    {
-        try { Process.Start(new ProcessStartInfo("https://developer.spotify.com/dashboard") { UseShellExecute = true }); }
-        catch (System.ComponentModel.Win32Exception) { SpotifyAccountStatus.Text = "Open developer.spotify.com/dashboard in your browser."; }
-    }
     private void OnOpenBrowserCompanion(object sender, RoutedEventArgs args)
     {
         try

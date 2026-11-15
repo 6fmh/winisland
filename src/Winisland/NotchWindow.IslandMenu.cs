@@ -4,14 +4,12 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 
 namespace Winisland;
 
 public partial class NotchWindow
 {
     private bool _islandMenuOpen;
-    private int _islandMenuTransitionVersion;
 
     private void BuildIslandMenu()
     {
@@ -77,8 +75,10 @@ public partial class NotchWindow
         _controlCenter?.SetActive(false);
         _controlCenter?.CancelAdjustment();
         _islandMenuOpen = true;
+        UpdateResourceDemand();
         RefreshIslandMenu();
-        Expand(_pinned);
+        if (!_expanded) Expand(_pinned);
+        UpdateVisualizer();
         UpdateExpandedLayout();
         UpdateDevicePresentation();
         if (_activeNotification is not null) UpdateNotificationPresentation();
@@ -104,41 +104,9 @@ public partial class NotchWindow
     {
         if (!_islandMenuOpen) return;
         _islandMenuOpen = false;
-        ++_islandMenuTransitionVersion;
+        UpdateResourceDemand();
         IslandMenuPanel.CancelInteraction();
     }
 
-    private void PresentIslandMenu()
-    {
-        var version = ++_islandMenuTransitionVersion;
-        if (!MotionEnabled) { FinishTabTransitions(); return; }
-        var selected = PanelFor(_selectedTab);
-        foreach (var panel in new FrameworkElement[] { MusicPanel, DynamicPlayer, IslandMenuPanel, FilesPanel, FocusPanel, OrganizerHost, ControlCenterHost, UpdatePanel })
-        {
-            var opacity = panel.IsVisible ? panel.Opacity : 0;
-            panel.BeginAnimation(OpacityProperty, null);
-            panel.IsHitTestVisible = ReferenceEquals(panel, selected);
-            if (ReferenceEquals(panel, selected))
-            {
-                panel.Visibility = Visibility.Visible;
-                panel.Opacity = 1;
-                panel.BeginAnimation(OpacityProperty, new DoubleAnimation(opacity, 1, DurationFor(180))
-                { BeginTime = TimeSpan.FromMilliseconds(MotionEnabled ? 45 : 0), FillBehavior = FillBehavior.Stop });
-            }
-            else if (panel.Visibility == Visibility.Visible)
-            {
-                panel.Opacity = 0;
-                var fade = new DoubleAnimation(opacity, 0, DurationFor(90)) { FillBehavior = FillBehavior.Stop };
-                fade.Completed += (_, _) =>
-                {
-                    if (version != _islandMenuTransitionVersion || ReferenceEquals(panel, PanelFor(_selectedTab))) return;
-                    panel.Visibility = Visibility.Collapsed;
-                    panel.BeginAnimation(OpacityProperty, null);
-                    panel.Opacity = 1;
-                };
-                panel.BeginAnimation(OpacityProperty, fade);
-                if (!MotionEnabled) panel.Visibility = Visibility.Collapsed;
-            }
-        }
-    }
+    private void PresentIslandMenu() => PresentActivityPanels();
 }

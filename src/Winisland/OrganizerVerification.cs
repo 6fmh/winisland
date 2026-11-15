@@ -58,6 +58,24 @@ internal static class OrganizerVerification
         var defaultDay = CalendarInterchange.Parse("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20271031\r\nSUMMARY:Clock-change day\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
         check(defaultDay.Entries.Single().DurationMinutes == 1440,
             "An all-day entry without an end lasts one calendar date across daylight-saving changes");
+        check(defaultDay.Entries.Single().Start.DateTime == new DateTime(2027, 10, 31)
+            && defaultDay.Entries.Single().Start.Offset == TimeSpan.Zero,
+            "All-day import preserves a civil date without depending on local midnight or timezone offsets");
+        foreach (var fixture in new[] { (Start: "20270327T120000", Minutes: 1380), (Start: "20271030T120000", Minutes: 1500) })
+        {
+            foreach (var duration in new[] { "P1D", "P1DT2H", "PT24H" })
+            {
+                var dayDuration = CalendarInterchange.Parse("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART;TZID=Europe/Stockholm:" + fixture.Start
+                    + "\r\nDURATION:" + duration + "\r\nSUMMARY:Clock-change duration\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+                var imported = dayDuration.Entries.Single();
+                var expected = duration == "PT24H" ? 1440 : fixture.Minutes + (duration == "P1DT2H" ? 120 : 0);
+                check(imported.DurationMinutes == expected,
+                    "Named-zone calendar day durations follow clock changes while hour durations retain elapsed time");
+                var roundtrip = CalendarInterchange.Parse(CalendarInterchange.Export(dayDuration.Entries)).Entries.Single();
+                check(roundtrip.Start == imported.Start && roundtrip.End == imported.End,
+                    "Clock-change duration endpoints survive export and reimport as exact instants");
+            }
+        }
         foreach (var duration in new[] { "P999999999999999999999999D", "P1M", "PT1000000000H" })
         {
             var excessive = CalendarInterchange.Parse("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20270312T143000Z\r\nDURATION:" + duration + "\r\nSUMMARY:Invalid duration\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");

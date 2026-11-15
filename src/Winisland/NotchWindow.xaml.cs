@@ -53,7 +53,7 @@ public partial class NotchWindow : Window
     private bool _allowClose;
     private bool _viewInitialized;
     private bool _pointerInside, _dragActive;
-    private int _pulseCount;
+    private long _nextBatteryRead;
     private bool _changingMediaSource;
     private long _elapsedFeedbackSecond = long.MinValue;
     private bool _elapsedFeedbackHasTime;
@@ -90,8 +90,12 @@ public partial class NotchWindow : Window
         _uploads = uploads ?? new ShelfUploadService(shelf, new UploadCredentialStore());
         _ownsPlayerVolume = playerVolume is null;
         _playerVolume = playerVolume ?? new PlayerVolumeService(Dispatcher, deferInitialization: true);
+        _playerVolume.SetPollingEnabled(false);
         InitializeComponent();
         _viewInitialized = true;
+        IsVisibleChanged += (_, _) => OnResourceVisibilityChanged(this, EventArgs.Empty);
+        StateChanged += OnResourceVisibilityChanged;
+        LocationChanged += (_, _) => UpdatePrewarmBounds();
         InitializeNotifications();
         PreviewKeyDown += (_, args) => OnNotificationKeyDown(args);
         InitializeUpdates();
@@ -153,6 +157,7 @@ public partial class NotchWindow : Window
         NativeMethods.ConfigureOverlay(handle);
         _source = HwndSource.FromHwnd(handle);
         _source.AddHook(WindowHook);
+        _pointerWatcher = new PointerProximityWatcher(_source, OnPointerMoved);
         if (!BackgroundVerification.IsWorker)
         {
             var openHotkey = NativeMethods.RegisterHotKey(handle, 1, 0x4003, 0x4E); // Ctrl + Alt + N, no repeat
@@ -245,7 +250,8 @@ public partial class NotchWindow : Window
         // Fallback for applications that do not emit the expected WinEvents.
         UpdateFullscreenVisibility();
         if (!_playbackRendering && _expanded && _selectedTab == "music" && _media.Current.IsPlaying && !_seeking) UpdateTimeline();
-        if (++_pulseCount % 4 != 1) return;
+        if (Environment.TickCount64 < _nextBatteryRead) return;
+        _nextBatteryRead = Environment.TickCount64 + 2000;
         MaintainOverlayVisibility();
         var battery = NativeMethods.GetBattery();
         if (_lastBattery is not null && battery.PluggedIn != _lastBattery.PluggedIn && battery.HasBattery)
@@ -359,8 +365,9 @@ public partial class NotchWindow : Window
                 + (audio.Step > 2 ? $" · {audio.Step:0.#}% steps" : "") : audio.ConnectionHint;
             PlayerVolumeControls.Visibility = audio.Available || !_media.Current.HasSession ? Visibility.Visible : Visibility.Collapsed;
             PlayerConnectionHint.Visibility = !audio.Available && _media.Current.HasSession ? Visibility.Visible : Visibility.Collapsed;
-            PlayerConnectionHint.Content = _media.Current.Source.Contains("spotify", StringComparison.OrdinalIgnoreCase)
-                ? "Set up Spotify player volume" : BrowserVolumeBridge.IsBrowserSource(_media.Current.Source)
+            PlayerConnectionHint.Content = !string.IsNullOrWhiteSpace(audio.ConnectionAction) ? audio.ConnectionAction
+                : _media.Current.Source.Contains("spotify", StringComparison.OrdinalIgnoreCase)
+                ? "Reconnect Spotify controls" : BrowserVolumeBridge.IsBrowserSource(_media.Current.Source)
                     ? "Connect browser for player volume" : "Player volume unavailable";
             PlayerConnectionHint.ToolTip = audio.ConnectionHint;
             System.Windows.Automation.AutomationProperties.SetName(MuteButton, audio.Muted ? "Unmute player" : "Mute player");
@@ -403,6 +410,7 @@ public partial class NotchWindow : Window
         CancelSeekAdjustment();
         VolumeSlider.CancelAdjustment();
         _expanded = _pinned = false;
+        _pointerNear = _pointerInside = false;
         _collapseTimer.Stop();
         AnimateExpandedContent(false);
         var handle = new WindowInteropHelper(this).Handle;
@@ -526,7 +534,7 @@ public partial class NotchWindow : Window
         ContentOffset.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(offset, opening ? 0 : -3, DurationFor(opening ? 280 : 120)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
     }
     private Duration DurationFor(int milliseconds) => new(TimeSpan.FromMilliseconds(MotionEnabled ? milliseconds : 0));
-    private void OnIslandSizeChanged(object sender, SizeChangedEventArgs e) => UpdateContour();
+    private void OnIslandSizeChanged(object sender, SizeChangedEventArgs e) { UpdateContour(); UpdatePrewarmBounds(); }
     private void UpdateContour()
     {
         if (Surface is null || DropHighlight is null) return;
@@ -581,6 +589,7 @@ public partial class NotchWindow : Window
     private void OnIslandEnter(object sender, MouseEventArgs e)
     {
         _pointerInside = true;
+        UpdateResourceDemand();
         _collapseTimer.Stop();
         if (_activeNotification is not null) _notificationTimer.Stop();
         if (_activeNotification is null && _settings.Current.ExpandOnHover && !_expanded) Expand(false);
@@ -588,6 +597,8 @@ public partial class NotchWindow : Window
     private void OnIslandLeave(object sender, MouseEventArgs e)
     {
         _pointerInside = false;
+        _pointerNear = false;
+        UpdateResourceDemand();
         if (_activeNotification is not null) ResumeNotificationTimer();
         _collapseTimer.Stop();
         CollapseIfPointerOutside();
@@ -675,8 +686,9 @@ public partial class NotchWindow : Window
     private void UpdateVisualizer()
     {
         UpdatePlaybackRendering();
-        var animate = ((!_expanded && CompactBars.Visibility == Visibility.Visible) || (_expanded && UsesIslandPlayer && _media.Current.IsPlaying))
+        var animate = ((!_expanded && CompactActivity.Visibility == Visibility.Visible && CompactBars.Visibility == Visibility.Visible) || (_expanded && _selectedTab == "music" && UsesIslandPlayer && _media.Current.IsPlaying))
             && !_showingHud && _deviceConnection is null && !_fullscreenHidden
+            && IsVisible && WindowState != WindowState.Minimized
             && !_settings.Current.ReducedMotion && SystemParameters.ClientAreaAnimation;
         if (animate)
         {
@@ -778,7 +790,9 @@ public partial class NotchWindow : Window
 
     private void UpdatePlaybackRendering()
     {
+        UpdateResourceDemand();
         var running = _expanded && _selectedTab == "music" && !_fullscreenHidden && _media.Current.IsPlaying
+            && IsVisible && WindowState != WindowState.Minimized
             && !_settings.Current.ReducedMotion && SystemParameters.ClientAreaAnimation;
         if (running == _playbackRendering) return;
         _playbackRendering = running;
@@ -1066,6 +1080,8 @@ public partial class NotchWindow : Window
         ContentRendered -= OnFirstContentRendered;
         SystemParameters.StaticPropertyChanged -= OnSystemParametersChanged;
         _fullscreenWatcher?.Dispose();
+        _pointerWatcher?.Dispose();
+        _playerVolume.SetPollingEnabled(false);
         _appleDevices?.Dispose(); _deviceTimer.Stop(); _deviceQueue.Clear();
         _pulse.Stop(); _playerPoll.Stop(); _collapseTimer.Stop(); _hudTimer.Stop(); _seekKeyboardTimer.Stop(); StopVisualizer();
         CompositionTarget.Rendering -= OnPlaybackRendering;

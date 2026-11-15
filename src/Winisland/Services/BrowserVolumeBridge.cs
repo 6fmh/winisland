@@ -21,6 +21,7 @@ public sealed class BrowserVolumeBridge : IPlayerVolumeBackend, IPlayerVolumeNot
     private readonly Dictionary<string, BrowserPlayer> _players = new();
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Task _listener;
+    private NamedPipeServerStream? _acceptingPipe;
     private bool _disposed;
     private static readonly Regex SafeId = new(@"\A[A-Za-z0-9:_-]{1,96}\z", RegexOptions.CultureInvariant);
     private static readonly (string Source, string Browser)[] BrowserSources =
@@ -125,14 +126,22 @@ public sealed class BrowserVolumeBridge : IPlayerVolumeBackend, IPlayerVolumeNot
             {
                 pipe = new NamedPipeServerStream(PipeName, PipeDirection.InOut, 16, PipeTransmissionMode.Byte,
                     PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly, 8192, 8192);
-                await pipe.WaitForConnectionAsync(_lifetime.Token);
                 lock (_gate)
                 {
-                    if (_clients.Count >= 8) { pipe.Dispose(); pipe = null; continue; }
+                    if (_disposed) break;
+                    _acceptingPipe = pipe;
                 }
-                var client = new BrowserClient(pipe);
-                pipe = null;
-                lock (_gate) _clients.Add(client.Key, client);
+                await pipe.WaitForConnectionAsync(_lifetime.Token);
+                BrowserClient client;
+                lock (_gate)
+                {
+                    _acceptingPipe = null;
+                    if (_disposed) break;
+                    if (_clients.Count >= 8) { pipe.Dispose(); pipe = null; continue; }
+                    client = new BrowserClient(pipe);
+                    _clients.Add(client.Key, client);
+                    pipe = null;
+                }
                 _ = RunClientAsync(client);
             }
             catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { break; }
@@ -140,7 +149,12 @@ public sealed class BrowserVolumeBridge : IPlayerVolumeBackend, IPlayerVolumeNot
             {
                 if (!_lifetime.IsCancellationRequested) await Task.Delay(1500, _lifetime.Token).ConfigureAwait(false);
             }
-            finally { pipe?.Dispose(); }
+            finally
+            {
+                lock (_gate)
+                    if (_acceptingPipe == pipe) _acceptingPipe = null;
+                pipe?.Dispose();
+            }
         }
     }
 
@@ -271,9 +285,16 @@ public sealed class BrowserVolumeBridge : IPlayerVolumeBackend, IPlayerVolumeNot
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true; _lifetime.Cancel();
-        lock (_gate) foreach (var client in _clients.Values) client.Pipe.Dispose();
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true; _lifetime.Cancel();
+            // Cancellation schedules asynchronous cleanup. Close the listening
+            // instance now so a replacement bridge cannot connect to it first.
+            _acceptingPipe?.Dispose();
+            _acceptingPipe = null;
+            foreach (var client in _clients.Values) client.Pipe.Dispose();
+        }
         // The listener and client tasks finish on cancellation; no dispatcher
         // thread waits on a browser process during shutdown.
     }

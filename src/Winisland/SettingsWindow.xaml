@@ -200,18 +200,13 @@
         <TextBlock x:Name="PlayerSetupStatus" Text="The companion controls HTML5 audio/video and YouTube's player. It also works with Chrome, Edge, Brave, and other Chromium browsers." TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource Secondary}" Margin="0,16,0,0" LineHeight="18"/>
         <Border Height="1" Background="#DFDFE6" Margin="0,20"/>
         <TextBlock Text="Spotify desktop" FontSize="15" FontWeight="SemiBold"/>
-        <TextBlock x:Name="SpotifySetupStatus" Text="Local playback and volume updates connect automatically when Spotify exposes its controls. Use Connect Spotify if needed. Some desktop versions expose 10% volume steps." TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource Secondary}" Margin="0,8,0,12" LineHeight="19" AutomationProperties.LiveSetting="Polite"/>
-        <Button x:Name="ConnectSpotifyButton" Content="Connect Spotify" Style="{StaticResource LightButton}" HorizontalAlignment="Left" Click="OnConnectSpotify" AutomationProperties.Name="Connect Spotify player volume"/>
+        <TextBlock x:Name="SpotifySetupStatus" Text="Local playback and volume updates connect automatically when Spotify exposes its controls. Reconnect local controls if needed. Some desktop versions expose 10% volume steps." TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource Secondary}" Margin="0,8,0,12" LineHeight="19" AutomationProperties.LiveSetting="Polite"/>
+        <Button x:Name="ConnectSpotifyButton" Content="Reconnect local controls" Style="{StaticResource LightButton}" HorizontalAlignment="Left" Click="OnConnectSpotify" AutomationProperties.Name="Reconnect Spotify desktop controls"/>
         <Border Background="White" CornerRadius="13" Padding="18" Margin="0,18,0,0"><StackPanel>
          <TextBlock Text="Connect your Spotify account" TextWrapping="Wrap" FontSize="15" FontWeight="SemiBold"/>
-         <TextBlock Text="Get 1% volume steps, including when Spotify is minimized. Requires Spotify Premium and your own app in the Spotify Developer Dashboard. Commands target Spotify on this PC." TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource Secondary}" Margin="0,8,0,12" LineHeight="19"/>
-         <Button Content="Open Spotify Developer Dashboard" Style="{StaticResource LightButton}" HorizontalAlignment="Left" Click="OnOpenSpotifyDashboard"/>
-         <TextBlock Text="Create an app with Web API enabled, add your Spotify account to its allowed users, and register this exact redirect URI:" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource Secondary}" Margin="0,12,0,6" LineHeight="18"/>
-         <TextBox Text="http://127.0.0.1:43827/spotify/callback/" IsReadOnly="True" Padding="8" AutomationProperties.Name="Spotify redirect URI"/>
-         <TextBlock Text="Client ID" FontWeight="SemiBold" Margin="0,12,0,6"/>
-         <TextBox x:Name="SpotifyClientIdInput" MaxLength="32" Padding="8" AutomationProperties.Name="Spotify app Client ID"/>
+         <TextBlock Text="Sign in to Spotify and allow Winisland to control playback. Get 1% volume steps, including when Spotify is minimized. Requires Spotify Premium. Commands target Spotify on this PC." TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource Secondary}" Margin="0,8,0,12" LineHeight="19"/>
          <WrapPanel Margin="0,12,0,10">
-          <Button x:Name="ConnectSpotifyAccountButton" Content="Sign in to Spotify" Style="{StaticResource LightButton}" Click="OnConnectSpotifyAccount" Margin="0,0,8,8"/>
+          <Button x:Name="ConnectSpotifyAccountButton" Content="Connect Spotify" Style="{StaticResource LightButton}" Click="OnConnectSpotifyAccount" Margin="0,0,8,8" AutomationProperties.Name="Connect Spotify account"/>
           <Button x:Name="DisconnectSpotifyAccountButton" Content="Disconnect account" Style="{StaticResource LightButton}" Click="OnDisconnectSpotifyAccount" Margin="0,0,8,8"/>
          </WrapPanel>
          <TextBlock x:Name="SpotifyAccountStatus" Text="Account not connected" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource Secondary}" LineHeight="18" AutomationProperties.LiveSetting="Polite"/>

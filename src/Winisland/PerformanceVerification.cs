@@ -38,6 +38,7 @@ internal static class PerformanceVerification
             workloads.Add(await RenderingPerformanceVerification.RunAsync(output, Check));
             workloads.Add(await UploadPerformanceVerification.RunAsync(output, Check));
             workloads.Add(await NativeHostPerformanceVerification.RunAsync(output, Check));
+            workloads.Add(await VisibilityOptimizationVerification.RunAsync(app, Check));
             passed = true;
         }
         catch (Exception ex)

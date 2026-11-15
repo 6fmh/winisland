@@ -39,6 +39,11 @@ public partial class NotificationBanner : UserControl
         MessageContent.InvalidateMeasure();
         MessageContent.Measure(new Size(MessageContent.Width, double.PositiveInfinity));
         ContentHeight = Math.Ceiling(Math.Max(44, MessageContent.DesiredSize.Height));
+        // Complete this manual layout even if the banner is dismissed before
+        // WPF's next frame. Grid clears its shared temporary definition buffer
+        // during Arrange; an unarranged hidden grid can otherwise retain row
+        // definitions (and entire windows) from a later settings layout.
+        MessageContent.Arrange(new Rect(0, 0, MessageContent.Width, ContentHeight));
         Height = ContentHeight;
     }
     private void OnDismiss(object sender, RoutedEventArgs args) { args.Handled = true; DismissRequested?.Invoke(this, EventArgs.Empty); }

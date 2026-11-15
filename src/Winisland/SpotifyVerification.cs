@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -18,7 +19,9 @@ internal static class SpotifyVerification
     internal static async Task RunAsync(Action<bool, string> assert)
     {
         VerifyFreshProfileDisconnect(assert);
+        await VerifyRegisteredSignInAsync(assert);
         await VerifyCallbackAsync(assert);
+        await VerifyAccessRefusalAsync(assert);
         var media = new MediaSnapshot { HasSession = true, Source = "Spotify.exe", Title = "Fixture track" };
         using var handler = new SpotifyHandler();
         using var account = new SpotifyAccount(new HttpClient(handler), false);
@@ -116,6 +119,91 @@ internal static class SpotifyVerification
         assert(!protectedAccount.IsConnected && !System.IO.File.Exists(path), "Disconnecting Spotify removes its protected account credential");
     }
 
+    private static Dictionary<string, string> ParseForm(string form) => form.TrimStart('?').Split('&')
+        .Select(pair => pair.Split('=', 2)).ToDictionary(pair => Uri.UnescapeDataString(pair[0].Replace('+', ' ')),
+            pair => Uri.UnescapeDataString(pair[1].Replace('+', ' ')), StringComparer.Ordinal);
+
+    private static async Task VerifyAccessRefusalAsync(Action<bool, string> assert)
+    {
+        using var handler = new SpotifyHandler { PlaybackForbidden = true };
+        using var account = new SpotifyAccount(new HttpClient(handler), false);
+        account.ConnectForTest(new string('a', 32), "fixture-refresh-token");
+        var media = new MediaSnapshot { HasSession = true, Source = "Spotify.exe" };
+        var refused = await account.ReadAsync(media, CancellationToken.None);
+        assert(account.IsConnected && !refused.Available && refused.ConnectionHint.Contains("User Management", StringComparison.Ordinal)
+            && refused.ConnectionAction == "Spotify account needs approval"
+            && !await account.WriteAsync(refused with { Volume = 40 }, CancellationToken.None),
+            "Spotify's real plain-text unapproved-user 403 preserves sign-in and explains owner approval without issuing commands");
+        handler.PlaybackForbidden = false;
+        await Task.Delay(1050);
+        assert((await account.ReadAsync(media, CancellationToken.None)).Available && handler.Refreshes == 1,
+            "Approving the Spotify app user restores playback volume without signing in again");
+    }
+
+    private static async Task VerifyRegisteredSignInAsync(Action<bool, string> assert)
+    {
+        using var packaged = new SpotifyAccount(new HttpClient(new SpotifyHandler()), false);
+        assert(packaged.CanConnect == (SpotifyAppRegistration.ClientId.Length == 32),
+            "Spotify sign-in uses embedded app registration (" + SpotifyAppRegistration.ClientId + ")");
+        var opened = false;
+        foreach (var invalid in new[] { "", "not-a-client-id", new string('g', 32) })
+        {
+            using var unavailable = new SpotifyAccount(new HttpClient(new SpotifyHandler()), false, invalid, _ => opened = true);
+            var rejected = false;
+            try { await unavailable.ConnectAsync(); }
+            catch (InvalidOperationException ex) { rejected = ex.Message == SpotifyAppRegistration.UnavailableMessage; }
+            assert(rejected && !unavailable.CanConnect && !opened && !unavailable.IsConnected,
+                "Missing or invalid packaged Spotify registration fails before opening a browser or starting sign-in");
+        }
+
+        var clientId = new string('b', 32);
+        using var handler = new AuthorizationHandler();
+        using var callbackHttp = new HttpClient();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        Dictionary<string, string>? authorization = null;
+        Task<HttpResponseMessage>? callbackRequest = null;
+        using var account = new SpotifyAccount(new HttpClient(handler), false, clientId, uri =>
+        {
+            assert(uri.GetLeftPart(UriPartial.Path) == "https://accounts.spotify.com/authorize",
+                "Connect Spotify sends the user directly to Spotify's authorization page");
+            authorization = ParseForm(uri.Query);
+            callbackRequest = callbackHttp.GetAsync(authorization["redirect_uri"] + "?state="
+                + Uri.EscapeDataString(authorization["state"]) + "&code=" + Uri.EscapeDataString("fixture+code/=?"), timeout.Token);
+        });
+        // A connection from an older user-supplied app must not choose the app
+        // used for a new authorization. Refreshes retain their saved client ID.
+        account.ConnectForTest(new string('a', 32), "old-app-refresh-token");
+        try
+        {
+            await account.ConnectAsync(timeout.Token);
+            using var callbackResponse = await callbackRequest!;
+            var tokenRequest = ParseForm(handler.TokenRequest!);
+            var verifier = tokenRequest["code_verifier"];
+            var challenge = Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(verifier)))
+                .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+            assert(callbackResponse.IsSuccessStatusCode && account.IsConnected && account.ClientId == clientId
+                && authorization!["client_id"] == clientId && tokenRequest["client_id"] == clientId,
+                "One-button Spotify sign-in uses the packaged app ID through callback, token exchange and account connection");
+            assert(authorization!["response_type"] == "code" && authorization["code_challenge_method"] == "S256"
+                && authorization["code_challenge"] == challenge && verifier.Length is >= 43 and <= 128
+                && authorization["state"].Length >= 43 && tokenRequest["grant_type"] == "authorization_code"
+                && tokenRequest["code"] == "fixture+code/=?" && !tokenRequest.ContainsKey("client_secret"),
+                "Packaged Spotify sign-in preserves random state and PKCE without sending a client secret");
+            assert(authorization["scope"] == "user-read-playback-state user-modify-playback-state"
+                && authorization["redirect_uri"] == SpotifyAccount.RedirectUri && tokenRequest["redirect_uri"] == SpotifyAccount.RedirectUri,
+                "Spotify consent requests only playback permissions and exchanges the exact loopback redirect URI");
+            var stored = System.Text.Encoding.UTF8.GetString(System.IO.File.ReadAllBytes(System.IO.Path.Combine(SettingsStore.DirectoryPath, "spotify-account.bin")));
+            using var restored = new SpotifyAccount(new HttpClient(new SpotifyHandler()), true, new string('c', 32));
+            assert(restored.IsConnected && restored.ClientId == clientId && !stored.Contains("authorized-refresh-token"),
+                "One-button Spotify sign-in saves encrypted credentials and reloads the original registration after restart");
+        }
+        finally
+        {
+            account.Disconnect();
+            if (callbackRequest is not null && !callbackRequest.IsCompleted) timeout.Cancel();
+        }
+    }
+
     private static void VerifyFreshProfileDisconnect(Action<bool, string> assert)
     {
         var previousDataDirectory = Environment.GetEnvironmentVariable("WINISLAND_DATA_DIR");
@@ -148,8 +236,108 @@ internal static class SpotifyVerification
             "Spotify loopback callback receives an encoded authorization code without administrator rights");
     }
 
+    private static async Task VerifyConnectedBackendAsync(App app, Action<bool, string> assert)
+    {
+        var slider = new System.Windows.Controls.Slider { Minimum = 0, Maximum = 1, Value = .62, Width = 180 };
+        System.Windows.Automation.AutomationProperties.SetName(slider, "Volym");
+        var window = new Window { Title = "Winisland connected Spotify fixture", Content = slider, Width = 240, Height = 100, ShowInTaskbar = false };
+        window.Show();
+        var handle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        try
+        {
+            using var handler = new SpotifyHandler { PlaybackForbidden = true };
+            using var account = new SpotifyAccount(new HttpClient(handler), false);
+            account.ConnectForTest(new string('a', 32), "fixture-refresh-token");
+            using var adapter = new SpotifyPlayerVolume(() => System.Windows.Automation.AutomationElement.FromHandle(handle), account);
+            using var service = new PlayerVolumeService(app.Dispatcher, new IPlayerVolumeBackend[] { adapter });
+            service.SetSource(new MediaSnapshot { HasSession = true, Source = "Spotify.exe" });
+            await service.WhenIdleAsync();
+            assert(service.Current.Available && service.Current.TargetId.StartsWith("spotify:", StringComparison.Ordinal)
+                && service.Current.Volume == 62 && account.IsConnected,
+                "A signed-in Spotify account refused API access retains the real native player volume control");
+            using var media = new MediaService(app.Dispatcher);
+            using var audio = new AudioService();
+            using var focus = new FocusTimer();
+            var settings = new SettingsStore();
+            settings.Update(settings.Current with { HasLaunched = true, ShowVolumeHud = true, ExpandOnHover = false, HideInFullscreen = false });
+            media.SetSnapshotForTest(new MediaSnapshot { HasSession = true, Source = "Spotify.exe", Title = "Fixture" });
+            var notch = new NotchWindow(settings, media, audio, focus, new FileShelf(), playerVolume: service);
+            try
+            {
+                notch.Show(); notch.StopPollingForTest();
+                slider.Value = .47;
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+                var hud = (FrameworkElement)notch.FindName("Hud");
+                var value = (System.Windows.Controls.TextBlock)notch.FindName("HudValue");
+                while ((service.Current.Volume != 47 || value.Text != "47%") && !timeout.IsCancellationRequested) await Task.Delay(15);
+                assert(service.Current.Available && service.Current.Volume == 47,
+                    "External Spotify slider notifications still update player volume while account API access is refused");
+                assert(hud.Visibility == Visibility.Visible && value.Text == "47%",
+                    "External native Spotify volume changes show the actual notch HUD despite account API refusal");
+            }
+            finally { notch.CloseForShutdown(); }
+            assert(await adapter.WriteAsync(service.Current with { Volume = 39 }, CancellationToken.None) && Math.Abs(slider.Value - .39) < .001,
+                "Spotify API refusal does not prevent writes to the available native player slider");
+        }
+        finally { window.Close(); }
+
+        using var release = new ManualResetEventSlim();
+        using var started = new ManualResetEventSlim();
+        using var allowedHandler = new SpotifyHandler();
+        using var allowedAccount = new SpotifyAccount(new HttpClient(allowedHandler), false);
+        allowedAccount.ConnectForTest(new string('a', 32), "fixture-refresh-token");
+        using var blockedLocal = new SpotifyPlayerVolume(() => { started.Set(); release.Wait(TimeSpan.FromSeconds(5)); return null; }, allowedAccount);
+        try
+        {
+            var pending = blockedLocal.ReadAsync(new MediaSnapshot { HasSession = true, Source = "Spotify.exe" }, CancellationToken.None);
+            var first = await Task.WhenAny(pending, Task.Delay(900));
+            assert(first == pending && (await pending).Available,
+                "A blocked Spotify accessibility provider cannot delay working account API volume");
+        }
+        finally { release.Set(); }
+
+        using var unavailableHandler = new SpotifyHandler { PlaybackForbidden = true };
+        using var unavailableAccount = new SpotifyAccount(new HttpClient(unavailableHandler), false);
+        unavailableAccount.ConnectForTest(new string('a', 32), "fixture-refresh-token");
+        using var brokenLocal = new SpotifyPlayerVolume(() => throw new InvalidOperationException("Fixture provider unavailable"), unavailableAccount);
+        using var unavailableService = new PlayerVolumeService(app.Dispatcher, new IPlayerVolumeBackend[] { brokenLocal });
+        unavailableService.SetSource(new MediaSnapshot { HasSession = true, Source = "Spotify.exe" });
+        await unavailableService.WhenIdleAsync();
+        assert(!unavailableService.Current.Available && unavailableService.Current.ConnectionAction == "Spotify account needs approval",
+            "A failed local accessibility provider preserves the actionable Spotify API refusal through the player service");
+        var accountSettings = new SettingsWindow(new SettingsStore(), playerVolume: unavailableService);
+        try
+        {
+            var button = (System.Windows.Controls.Button)accountSettings.FindName("ConnectSpotifyAccountButton");
+            var status = (System.Windows.Controls.TextBlock)accountSettings.FindName("SpotifyAccountStatus");
+            assert((string)button.Content == "Switch Spotify account" && status.Text.Contains("User Management", StringComparison.Ordinal),
+                "Signed-in Spotify settings offer account switching and explain approval instead of asking to reconnect");
+        }
+        finally { accountSettings.Close(); }
+    }
+
     internal static async Task RunNotchAsync(App app, Action<bool, string> assert)
     {
+        await VerifyConnectedBackendAsync(app, assert);
+        foreach (var clientId in new[] { "", SpotifyAppRegistration.ClientId })
+        {
+            using var settingsAccount = new SpotifyAccount(new HttpClient(new SpotifyHandler()), false, clientId, _ =>
+                throw new InvalidOperationException("Settings rendering must not open a browser."));
+            using var settingsPlayer = new PlayerVolumeService(app.Dispatcher,
+                new IPlayerVolumeBackend[] { new SpotifyPlayerVolume(() => null, settingsAccount) });
+            var settingsWindow = new SettingsWindow(new SettingsStore(), playerVolume: settingsPlayer);
+            try
+            {
+                var connect = (System.Windows.Controls.Button)settingsWindow.FindName("ConnectSpotifyAccountButton");
+                var status = (System.Windows.Controls.TextBlock)settingsWindow.FindName("SpotifyAccountStatus");
+                assert((string)connect.Content == "Connect Spotify" && settingsWindow.FindName("SpotifyClientIdInput") is null
+                    && connect.IsEnabled == settingsAccount.CanConnect,
+                    "Spotify account settings offer Connect Spotify without developer fields and reflect registration availability");
+                if (!settingsAccount.CanConnect) assert(status.Text == SpotifyAppRegistration.UnavailableMessage,
+                    "Unconfigured Spotify settings explain availability inline without requiring developer setup");
+            }
+            finally { settingsWindow.Close(); }
+        }
         using var media = new MediaService(app.Dispatcher);
         using var audio = new AudioService();
         using var focus = new FocusTimer();
@@ -202,10 +390,24 @@ internal static class SpotifyVerification
         finally { notch.CloseForShutdown(); }
     }
 
+    private sealed class AuthorizationHandler : HttpMessageHandler
+    {
+        internal string? TokenRequest { get; private set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.AbsoluteUri != "https://accounts.spotify.com/api/token" || request.Method != HttpMethod.Post)
+                throw new InvalidOperationException("Unexpected authorization request.");
+            TokenRequest = await request.Content!.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new
+                { access_token = "authorized-access-token", expires_in = 3600, refresh_token = "authorized-refresh-token" })) };
+        }
+    }
+
     private sealed class SpotifyHandler : HttpMessageHandler
     {
         internal string DeviceName { get; init; } = Environment.MachineName;
         internal bool Restricted { get; init; }
+        internal bool PlaybackForbidden { get; set; }
         internal bool RateLimited { get; init; }
         internal bool RefreshRejected { get; init; }
         internal bool RotateRefreshToken { get; init; }
@@ -237,6 +439,8 @@ internal static class SpotifyVerification
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
             }
             PlaybackReads++;
+            if (PlaybackForbidden) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden)
+                { Content = new StringContent("Check settings on https://developer.spotify.com/dashboard, the user may not be registered.") });
             if (PlaybackJson is not null) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(PlaybackJson) });
             if (UnauthorizedOnce) { UnauthorizedOnce = false; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)); }
             if (RateLimited)

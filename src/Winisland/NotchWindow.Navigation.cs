@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -14,7 +15,9 @@ namespace Winisland;
 public partial class NotchWindow
 {
     private bool _changingTab;
-    private int _tabTransitionVersion;
+    private readonly Dictionary<FrameworkElement, PanelMotion> _panelMotions = new();
+    private sealed record PanelMotion(AnimationClock OpacityClock, AnimationClock OffsetClock,
+        SpringEase OffsetEase, double OffsetDistance, bool WasEnabled);
     private double ExpandedPanelHeight => BaseExpandedPanelHeight + (_activeNotification is not null ? NotificationFooterHeight
         : UsesIslandPlayer && _deviceConnection is not null ? AppleConnectionContentHeight : 0);
     private double BaseExpandedPanelHeight => _islandMenuOpen ? DynamicIslandMetrics.MenuHeight : UsesIslandPlayer ? DynamicIslandMetrics.ExpandedHeight : (_selectedTab switch
@@ -40,18 +43,19 @@ public partial class NotchWindow
     {
         if (_changingTab || MusicPanel is null || OrganizerHost is null) return;
         if (tab is not ("music" or "files" or "focus" or "calendar" or "tools" or "controls" or "updates")) tab = "music";
+        var menuWasOpen = _islandMenuOpen;
         if (_islandMenuOpen) ResetIslandMenu();
         _changingTab = true;
         try
         {
-            var changed = _selectedTab != tab;
+            var changed = menuWasOpen || _selectedTab != tab;
             _selectedTab = tab;
             if (tab != "music")
             {
                 CancelSeekAdjustment();
                 VolumeSlider.CancelAdjustment();
             }
-            UpdatePlaybackRendering();
+            UpdateVisualizer();
             MusicTab.IsChecked = tab == "music";
             FilesTab.IsChecked = tab == "files";
             FocusTab.IsChecked = tab == "focus";
@@ -72,51 +76,100 @@ public partial class NotchWindow
                 FinishTabTransitions();
                 return;
             }
-            var incoming = PanelFor(tab);
-            var version = ++_tabTransitionVersion;
-            foreach (var panel in new FrameworkElement[] { MusicPanel, DynamicPlayer, IslandMenuPanel, FilesPanel, FocusPanel, OrganizerHost, ControlCenterHost, UpdatePanel })
-            {
-                if (ReferenceEquals(panel, incoming))
-                {
-                    var wasVisible = panel.Visibility == Visibility.Visible;
-                    var from = wasVisible ? panel.Opacity : 0;
-                    panel.Visibility = Visibility.Visible;
-                    panel.IsHitTestVisible = true;
-                    panel.Opacity = 1;
-                    panel.BeginAnimation(OpacityProperty, new DoubleAnimation(from, 1, DurationFor(180))
-                    { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }, FillBehavior = FillBehavior.Stop });
-                    if (panel.RenderTransform is not TranslateTransform) panel.RenderTransform = new TranslateTransform();
-                    var offset = (TranslateTransform)panel.RenderTransform;
-                    var fromOffset = wasVisible ? offset.Y : 5;
-                    offset.Y = 0;
-                    offset.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(fromOffset, 0, DurationFor(180))
-                    { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }, FillBehavior = FillBehavior.Stop });
-                }
-                else if (panel.Visibility == Visibility.Visible)
-                {
-                    panel.IsHitTestVisible = false;
-                    var exit = new DoubleAnimation(panel.Opacity, 0, DurationFor(90)) { FillBehavior = FillBehavior.Stop };
-                    exit.Completed += (_, _) =>
-                    {
-                        if (version != _tabTransitionVersion || ReferenceEquals(panel, PanelFor(_selectedTab))) return;
-                        panel.Visibility = Visibility.Collapsed;
-                        panel.BeginAnimation(OpacityProperty, null);
-                        panel.Opacity = 1;
-                    };
-                    panel.BeginAnimation(OpacityProperty, exit);
-                    panel.Opacity = 0;
-                }
-            }
+            PresentActivityPanels();
         }
         finally { _changingTab = false; }
     }
 
+    private FrameworkElement[] ActivityPanels => new FrameworkElement[]
+        { MusicPanel, DynamicPlayer, IslandMenuPanel, FilesPanel, FocusPanel, OrganizerHost, ControlCenterHost, UpdatePanel };
+
+    private void HandoffPanelFocus(FrameworkElement selected)
+    {
+        // Only move focus that belongs to a departing view. Hover and background
+        // state changes must never take focus from header/footer actions or apps.
+        if (!_expanded) return;
+        foreach (var panel in ActivityPanels)
+            if (!ReferenceEquals(panel, selected) && panel.IsKeyboardFocusWithin)
+            { SelectedTabControl.Focus(); break; }
+    }
+
+    private void PresentActivityPanels()
+    {
+        if (!MotionEnabled || !_expanded) { FinishTabTransitions(); return; }
+        var selected = PanelFor(_selectedTab);
+        AnimateActivityPanel(selected, true);
+        HandoffPanelFocus(selected);
+        foreach (var panel in ActivityPanels)
+        {
+            if (ReferenceEquals(panel, selected) || panel.Visibility != Visibility.Visible) continue;
+            AnimateActivityPanel(panel, false);
+        }
+    }
+
+    private void AnimateActivityPanel(FrameworkElement panel, bool entering)
+    {
+        var wasVisible = panel.Visibility == Visibility.Visible;
+        var fromOpacity = wasVisible ? panel.Opacity : 0;
+        if (panel.RenderTransform is not TranslateTransform) panel.RenderTransform = new TranslateTransform();
+        var offset = (TranslateTransform)panel.RenderTransform;
+        var fromOffset = wasVisible ? offset.Y : 4;
+        var wasEnabled = panel.IsEnabled;
+        var velocity = 0.0;
+        if (_panelMotions.TryGetValue(panel, out var previous))
+        {
+            wasEnabled = previous.WasEnabled;
+            var progress = (previous.OffsetClock.CurrentTime?.TotalSeconds ?? 0) / previous.OffsetEase.AnimationSeconds;
+            velocity = previous.OffsetDistance * previous.OffsetEase.VelocityAt(progress);
+        }
+        panel.BeginAnimation(OpacityProperty, null);
+        offset.BeginAnimation(TranslateTransform.YProperty, null);
+        // Keep the presented values as the base until the clock's first tick.
+        // A reversal in this dispatcher turn then cannot reveal a future target.
+        panel.Opacity = fromOpacity;
+        offset.Y = fromOffset;
+        panel.Visibility = Visibility.Visible;
+        panel.IsHitTestVisible = entering;
+        panel.IsEnabled = entering && wasEnabled;
+        var targetOpacity = entering ? 1 : 0;
+        var targetOffset = entering ? 0 : -3;
+        var seconds = entering ? 0.18 : 0.09;
+        var distance = targetOffset - fromOffset;
+        var ease = new SpringEase
+        {
+            DampingRatio = 1, ResponseSeconds = seconds * 0.9, AnimationSeconds = seconds,
+            InitialVelocity = Math.Abs(distance) > 0.000001 ? velocity / distance : 0
+        };
+        var fadeClock = new DoubleAnimation(fromOpacity, targetOpacity, TimeSpan.FromSeconds(seconds))
+            { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } }.CreateClock();
+        var offsetClock = new DoubleAnimation(fromOffset, targetOffset, TimeSpan.FromSeconds(seconds))
+            { EasingFunction = ease }.CreateClock();
+        var motion = new PanelMotion(fadeClock, offsetClock, ease, distance, wasEnabled);
+        _panelMotions[panel] = motion;
+        fadeClock.Completed += (_, _) =>
+        {
+            if (!_panelMotions.TryGetValue(panel, out var current) || !ReferenceEquals(current, motion)) return;
+            _panelMotions.Remove(panel);
+            panel.BeginAnimation(OpacityProperty, null);
+            offset.BeginAnimation(TranslateTransform.YProperty, null);
+            panel.Opacity = 1;
+            offset.Y = 0;
+            panel.Visibility = entering ? Visibility.Visible : Visibility.Collapsed;
+            panel.IsEnabled = wasEnabled;
+        };
+        panel.ApplyAnimationClock(OpacityProperty, fadeClock);
+        offset.ApplyAnimationClock(TranslateTransform.YProperty, offsetClock);
+    }
+
     private void FinishTabTransitions()
     {
-        ++_tabTransitionVersion;
         var selected = PanelFor(_selectedTab);
-        foreach (var panel in new FrameworkElement[] { MusicPanel, DynamicPlayer, IslandMenuPanel, FilesPanel, FocusPanel, OrganizerHost, ControlCenterHost, UpdatePanel })
+        if (_panelMotions.TryGetValue(selected, out var previous)) selected.IsEnabled = previous.WasEnabled;
+        selected.Visibility = Visibility.Visible;
+        HandoffPanelFocus(selected);
+        foreach (var panel in ActivityPanels)
         {
+            if (_panelMotions.TryGetValue(panel, out var motion)) panel.IsEnabled = motion.WasEnabled;
             panel.BeginAnimation(OpacityProperty, null);
             panel.Opacity = 1;
             panel.Visibility = ReferenceEquals(panel, selected) ? Visibility.Visible : Visibility.Collapsed;
@@ -124,6 +177,7 @@ public partial class NotchWindow
             if (panel.RenderTransform is TranslateTransform offset)
             { offset.BeginAnimation(TranslateTransform.YProperty, null); offset.Y = 0; }
         }
+        _panelMotions.Clear();
     }
 
     private void OnMusicTab(object sender, RoutedEventArgs e) => SetTab("music");

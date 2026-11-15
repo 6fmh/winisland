@@ -75,12 +75,12 @@ public static class CalendarInterchange
                         if (current.ContainsKey("DURATION")) throw new ArgumentException("Event supplies both an end and a duration.");
                         var end = ParseInstant(endProperty, out var endAllDay);
                         if (allDay != endAllDay) throw new ArgumentException("Event start and end use different value types.");
-                        duration = allDay ? (DateOnly.FromDateTime(end.LocalDateTime).DayNumber - DateOnly.FromDateTime(start.LocalDateTime).DayNumber) * 1440
+                        duration = allDay ? (DateOnly.FromDateTime(end.DateTime).DayNumber - DateOnly.FromDateTime(start.DateTime).DayNumber) * 1440
                             : (int)Math.Round((end - start).TotalMinutes);
                     }
                     else if (current.TryGetValue("DURATION", out var durationProperty))
                     {
-                        var span = ParseDuration(durationProperty.Value, allDay);
+                        var span = ParseDuration(durationProperty.Value, allDay, startProperty, start);
                         duration = (int)Math.Round(span.TotalMinutes);
                     }
                     if (duration is < 1 or > 10080 || start.Year < 1900 || start.Year >= 9999) throw new ArgumentException("Event date or duration is out of range.");
@@ -163,32 +163,49 @@ public static class CalendarInterchange
         if (allDay)
         {
             if (!DateOnly.TryParseExact(value, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)) throw new FormatException("Invalid calendar date.");
-            return OrganizerCalendar.LocalInstant(date, TimeOnly.MinValue);
+            // DATE has no timezone or instant: midnight may not even exist in
+            // the local zone. Preserve its civil date in the stored offset.
+            return new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         }
         if (value.EndsWith('Z'))
             return DateTimeOffset.ParseExact(value, new[] { "yyyyMMdd'T'HHmmss'Z'", "yyyyMMdd'T'HHmm'Z'" }, CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
         var wallTime = DateTime.ParseExact(value, new[] { "yyyyMMdd'T'HHmmss", "yyyyMMdd'T'HHmm" }, CultureInfo.InvariantCulture, DateTimeStyles.None);
-        var zoneId = property.Parameters.Split(';').FirstOrDefault(p => p.StartsWith("TZID=", StringComparison.OrdinalIgnoreCase));
-        var zone = zoneId is null ? TimeZoneInfo.Local : TimeZoneInfo.FindSystemTimeZoneById(zoneId[5..].Trim('"'));
+        var zone = ResolveZone(property);
         if (zone.IsInvalidTime(wallTime)) throw new ArgumentException("Calendar event falls in a daylight-saving clock change.");
         return new DateTimeOffset(DateTime.SpecifyKind(wallTime, DateTimeKind.Unspecified), zone.GetUtcOffset(wallTime));
     }
 
-    private static TimeSpan ParseDuration(string value, bool allDay)
+    private static TimeZoneInfo ResolveZone(Property property)
+    {
+        var zoneId = property.Parameters.Split(';').FirstOrDefault(p => p.StartsWith("TZID=", StringComparison.OrdinalIgnoreCase));
+        return zoneId is null ? TimeZoneInfo.Local : TimeZoneInfo.FindSystemTimeZoneById(zoneId[5..].Trim('"'));
+    }
+
+    private static TimeSpan ParseDuration(string value, bool allDay, Property startProperty, DateTimeOffset start)
     {
         var match = DurationPattern.Match(value);
         if (!match.Success || allDay && value.Contains('T')) throw new FormatException("Unsupported calendar duration.");
         long seconds = 0;
+        var days = 0;
         foreach (var (group, factor) in new[] { ("w", 604800L), ("d", 86400L), ("h", 3600L), ("m", 60L), ("s", 1L) })
         {
             if (!match.Groups[group].Success) continue;
             if (!int.TryParse(match.Groups[group].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var amount) || amount > 604800)
                 throw new FormatException("Calendar duration is out of range.");
             seconds += amount * factor;
+            if (group == "w") days += amount * 7;
+            else if (group == "d") days += amount;
         }
         if (seconds is < 1 or > 604800) throw new ArgumentException("Calendar duration is out of range.");
-        return TimeSpan.FromSeconds(seconds);
+        if (allDay || days == 0) return TimeSpan.FromSeconds(seconds);
+        // RFC 5545 days/weeks are calendar units; hours/minutes/seconds are
+        // elapsed units. A local P1D can last 23 or 25 hours at a clock change.
+        var zone = startProperty.Value.Trim().EndsWith('Z') ? TimeZoneInfo.Utc : ResolveZone(startProperty);
+        var endDay = start.DateTime.AddDays(days);
+        if (zone.IsInvalidTime(endDay)) throw new ArgumentException("Calendar duration ends in a daylight-saving clock change.");
+        return new DateTimeOffset(endDay, zone.GetUtcOffset(endDay)) - start
+            + TimeSpan.FromSeconds(seconds - days * 86400L);
     }
 
     private static void ValidateComponents(IReadOnlyList<string> lines)
